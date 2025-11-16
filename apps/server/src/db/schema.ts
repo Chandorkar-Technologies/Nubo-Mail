@@ -128,7 +128,7 @@ export const connection = createTable(
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),
     scope: text('scope').notNull(),
-    providerId: text('provider_id').$type<'google' | 'microsoft'>().notNull(),
+    providerId: text('provider_id').$type<'google' | 'microsoft' | 'imap'>().notNull(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
@@ -138,6 +138,36 @@ export const connection = createTable(
     index('connection_user_id_idx').on(t.userId),
     index('connection_expires_at_idx').on(t.expiresAt),
     index('connection_provider_id_idx').on(t.providerId),
+  ],
+);
+
+export const imapConfig = createTable(
+  'imap_config',
+  {
+    id: text('id').primaryKey(),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' })
+      .unique(),
+    imapHost: text('imap_host').notNull(),
+    imapPort: integer('imap_port').notNull().default(993),
+    imapSecure: boolean('imap_secure').notNull().default(true),
+    smtpHost: text('smtp_host'),
+    smtpPort: integer('smtp_port').default(587),
+    smtpSecure: boolean('smtp_secure').default(true),
+    username: text('username').notNull(),
+    encryptedPassword: text('encrypted_password').notNull(),
+    lastSyncUidvalidity: text('last_sync_uidvalidity'),
+    lastSyncUid: integer('last_sync_uid'),
+    folderStructure: jsonb('folder_structure').$type<
+      Array<{ name: string; delimiter: string; attributes: string[] }>
+    >(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
+  },
+  (t) => [
+    index('imap_config_connection_id_idx').on(t.connectionId),
+    index('imap_config_imap_host_idx').on(t.imapHost),
   ],
 );
 

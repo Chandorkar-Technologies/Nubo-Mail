@@ -7,6 +7,7 @@ import {
 import {
   account,
   connection,
+  imapConfig,
   note,
   session,
   user,
@@ -199,6 +200,23 @@ export class DbRpcDO extends RpcTarget {
 
   async updateEmailTemplate(templateId: string, data: Partial<typeof emailTemplate.$inferInsert>) {
     return await this.mainDo.updateEmailTemplate(this.userId, templateId, data);
+  }
+
+  // IMAP config methods
+  async createImapConfig(payload: typeof imapConfig.$inferInsert) {
+    return await this.mainDo.createImapConfig(payload);
+  }
+
+  async getImapConfig(connectionId: string): Promise<typeof imapConfig.$inferSelect | undefined> {
+    return await this.mainDo.getImapConfig(connectionId);
+  }
+
+  async updateImapConfig(connectionId: string, data: Partial<typeof imapConfig.$inferInsert>) {
+    return await this.mainDo.updateImapConfig(connectionId, data);
+  }
+
+  async deleteImapConfig(connectionId: string) {
+    return await this.mainDo.deleteImapConfig(connectionId);
   }
 }
 
@@ -561,6 +579,29 @@ class ZeroDB extends DurableObject<ZeroEnv> {
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(emailTemplate.id, templateId), eq(emailTemplate.userId, userId)))
       .returning();
+  }
+
+  // IMAP config methods
+  async createImapConfig(payload: typeof imapConfig.$inferInsert) {
+    return await this.db.insert(imapConfig).values(payload).returning();
+  }
+
+  async getImapConfig(connectionId: string): Promise<typeof imapConfig.$inferSelect | undefined> {
+    return await this.db.query.imapConfig.findFirst({
+      where: eq(imapConfig.connectionId, connectionId),
+    });
+  }
+
+  async updateImapConfig(connectionId: string, data: Partial<typeof imapConfig.$inferInsert>) {
+    return await this.db
+      .update(imapConfig)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(imapConfig.connectionId, connectionId))
+      .returning();
+  }
+
+  async deleteImapConfig(connectionId: string) {
+    return await this.db.delete(imapConfig).where(eq(imapConfig.connectionId, connectionId));
   }
 }
 
