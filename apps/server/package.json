@@ -58,6 +58,7 @@
     "cheerio": "1.1.0",
     "cf-imap": "^0.0.12",
     "cloudflare": "4.5.0",
+    "worker-mailer": "^1.0.2",
     "date-fns": "^4.1.0",
     "dedent": "^1.6.0",
     "dormroom": "1.0.1",

@@ -678,6 +678,9 @@ importers:
       uuid:
         specifier: 11.1.0
         version: 11.1.0
+      worker-mailer:
+        specifier: ^1.0.2
+        version: 1.2.1
       wrangler:
         specifier: 'catalog:'
         version: 4.32.0(@cloudflare/workers-types@4.20250628.0)
@@ -9799,6 +9802,9 @@ packages:
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
+
+  worker-mailer@1.2.1:
+    resolution: {integrity: sha512-gS2ei/mrpRqNs+AHmqxhT6vFPwCLw2qnz5ShmyGD0ULaU0Q9hxnFAcx9jhAip/MnD6+MjgnQu6hQQgA8mlOkVA==}
 
   workerd@1.20250617.0:
     resolution: {integrity: sha512-Uv6p0PYUHp/W/aWfUPLkZVAoAjapisM27JJlwcX9wCPTfCfnuegGOxFMvvlYpmNaX4YCwEdLCwuNn3xkpSkuZw==}
@@ -19866,6 +19872,8 @@ snapshots:
       stackback: 0.0.2
 
   word-wrap@1.2.5: {}
+
+  worker-mailer@1.2.1: {}
 
   workerd@1.20250617.0:
     optionalDependencies:

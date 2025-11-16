@@ -15,8 +15,9 @@ import { m } from '@/paraglide/messages';
 import { motion } from 'motion/react';
 import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { ImapForm } from './imap-form';
 
 export const AddConnectionDialog = ({
   children,
@@ -28,6 +29,7 @@ export const AddConnectionDialog = ({
   onOpenChange?: (open: boolean) => void;
 }) => {
   const { connections, attach } = useBilling();
+  const [showImapForm, setShowImapForm] = useState(false);
 
   const canCreateConnection = useMemo(() => {
     if (!connections?.remaining && !connections?.unlimited) return false;
@@ -109,12 +111,16 @@ export const AddConnectionDialog = ({
                   disabled={!canCreateConnection}
                   variant="outline"
                   className="h-24 w-full flex-col items-center justify-center gap-2"
-                  onClick={async () =>
-                    await authClient.linkSocial({
-                      provider: provider.providerId,
-                      callbackURL: `${window.location.origin}${pathname}`,
-                    })
-                  }
+                  onClick={async () => {
+                    if (provider.providerId === 'imap') {
+                      setShowImapForm(true);
+                    } else {
+                      await authClient.linkSocial({
+                        provider: provider.providerId,
+                        callbackURL: `${window.location.origin}${pathname}`,
+                      });
+                    }
+                  }}
                 >
                   <Icon className="size-6!" />
                   <span className="text-xs">{provider.name}</span>
@@ -139,6 +145,9 @@ export const AddConnectionDialog = ({
           </motion.div>
         </motion.div>
       </DialogContent>
+
+      {/* IMAP Form Dialog */}
+      <ImapForm open={showImapForm} onOpenChange={setShowImapForm} />
     </Dialog>
   );
 };

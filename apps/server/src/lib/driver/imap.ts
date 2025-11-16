@@ -1,6 +1,7 @@
 import type { MailManager, ManagerConfig, IGetThreadResponse, ParsedDraft } from './types';
 import type { IOutgoingMessage, Label, ParsedMessage, DeleteAllSpamResponse } from '../../types';
 import type { CreateDraftData } from '../schemas';
+import { SMTPClient } from './smtp';
 import { CFImap } from 'cf-imap';
 import { parseAddressList, parseFrom } from '../email-utils';
 import { StandardizedError } from './utils';
@@ -10,6 +11,14 @@ interface ImapConnectionConfig {
   host: string;
   port: number;
   tls: boolean;
+  username: string;
+  password: string;
+}
+
+interface SmtpConnectionConfig {
+  host: string;
+  port: number;
+  secure: boolean;
   username: string;
   password: string;
 }
@@ -37,6 +46,8 @@ interface ImapMessage {
 
 export class ImapMailManager implements MailManager {
   private imapConfig: ImapConnectionConfig | null = null;
+  private smtpConfig: SmtpConnectionConfig | null = null;
+  private smtpClient: SMTPClient | null = null;
 
   constructor(public config: ManagerConfig) {
     // IMAP config will be loaded when needed from database
@@ -46,8 +57,15 @@ export class ImapMailManager implements MailManager {
    * Initialize IMAP configuration
    * This should be called with the imapConfig from the database
    */
-  public async initialize(imapConfig: ImapConnectionConfig): Promise<void> {
+  public async initialize(
+    imapConfig: ImapConnectionConfig,
+    smtpConfig?: SmtpConnectionConfig,
+  ): Promise<void> {
     this.imapConfig = imapConfig;
+    if (smtpConfig) {
+      this.smtpConfig = smtpConfig;
+      this.smtpClient = new SMTPClient(smtpConfig);
+    }
   }
 
   /**
@@ -336,17 +354,25 @@ export class ImapMailManager implements MailManager {
   // ==================== Unsupported Operations for IMAP (Read-Only) ====================
 
   public async create(data: IOutgoingMessage): Promise<{ id?: string | null }> {
-    throw new StandardizedError(
-      'Sending emails via IMAP is not supported. Use SMTP instead.',
-      'UNSUPPORTED_OPERATION',
-    );
+    if (!this.smtpClient) {
+      throw new StandardizedError(
+        'SMTP configuration not initialized. Cannot send emails.',
+        'CONFIGURATION_ERROR',
+      );
+    }
+
+    return await this.smtpClient.sendEmail(data);
   }
 
   public async sendDraft(id: string, data: IOutgoingMessage): Promise<void> {
-    throw new StandardizedError(
-      'Sending emails via IMAP is not supported. Use SMTP instead.',
-      'UNSUPPORTED_OPERATION',
-    );
+    if (!this.smtpClient) {
+      throw new StandardizedError(
+        'SMTP configuration not initialized. Cannot send emails.',
+        'CONFIGURATION_ERROR',
+      );
+    }
+
+    await this.smtpClient.sendEmail(data);
   }
 
   public async createDraft(
