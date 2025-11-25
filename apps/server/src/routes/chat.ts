@@ -54,63 +54,63 @@ export enum OutgoingMessageType {
 
 export type IncomingMessage =
   | {
-      type: IncomingMessageType.UseChatRequest;
-      id: string;
-      init: Pick<RequestInit, 'method' | 'headers' | 'body'>;
-    }
+    type: IncomingMessageType.UseChatRequest;
+    id: string;
+    init: Pick<RequestInit, 'method' | 'headers' | 'body'>;
+  }
   | {
-      type: IncomingMessageType.ChatClear;
-    }
+    type: IncomingMessageType.ChatClear;
+  }
   | {
-      type: IncomingMessageType.ChatMessages;
-      messages: ChatMessage[];
-    }
+    type: IncomingMessageType.ChatMessages;
+    messages: ChatMessage[];
+  }
   | {
-      type: IncomingMessageType.ChatRequestCancel;
-      id: string;
-    }
+    type: IncomingMessageType.ChatRequestCancel;
+    id: string;
+  }
   | {
-      type: IncomingMessageType.Mail_List;
-      folder: string;
-      query: string;
-      maxResults: number;
-      labelIds: string[];
-      pageToken: string;
-    }
+    type: IncomingMessageType.Mail_List;
+    folder: string;
+    query: string;
+    maxResults: number;
+    labelIds: string[];
+    pageToken: string;
+  }
   | {
-      type: IncomingMessageType.Mail_Get;
-      threadId: string;
-    };
+    type: IncomingMessageType.Mail_Get;
+    threadId: string;
+  };
 
 export type OutgoingMessage =
   | {
-      type: OutgoingMessageType.ChatMessages;
-      messages: ChatMessage[];
-    }
+    type: OutgoingMessageType.ChatMessages;
+    messages: ChatMessage[];
+  }
   | {
-      type: OutgoingMessageType.UseChatResponse;
-      id: string;
-      body: string;
-      done: boolean;
-    }
+    type: OutgoingMessageType.UseChatResponse;
+    id: string;
+    body: string;
+    done: boolean;
+  }
   | {
-      type: OutgoingMessageType.ChatClear;
-    }
+    type: OutgoingMessageType.ChatClear;
+  }
   | {
-      type: OutgoingMessageType.Mail_List;
-      result: {
-        threads: {
-          id: string;
-          historyId: string | null;
-        }[];
-        nextPageToken: string | null;
-      };
-    }
-  | {
-      type: OutgoingMessageType.Mail_Get;
-      result: IGetThreadResponse;
-      threadId: string;
+    type: OutgoingMessageType.Mail_List;
+    result: {
+      threads: {
+        id: string;
+        historyId: string | null;
+      }[];
+      nextPageToken: string | null;
     };
+  }
+  | {
+    type: OutgoingMessageType.Mail_Get;
+    result: IGetThreadResponse;
+    threadId: string;
+  };
 
 export class AgentRpcDO extends RpcTarget {
   constructor(
@@ -1170,7 +1170,7 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
       throw new Error('Unauthorized');
     }
     this.activeConnectionId = _connection.id;
-    const driver = connectionToDriver(_connection);
+    const driver = connectionToDriver(_connection, env.THREADS_BUCKET);
 
     this.server.tool('getConnections', async () => {
       const connections = await db.query.connection.findMany({
@@ -1286,11 +1286,11 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
           content: content.length
             ? content.flat()
             : [
-                {
-                  type: 'text' as const,
-                  text: 'No threads found',
-                },
-              ],
+              {
+                type: 'text' as const,
+                text: 'No threads found',
+              },
+            ],
         };
       },
     );
@@ -1480,9 +1480,9 @@ export class ZeroMCP extends McpAgent<typeof env, {}, { userId: string }> {
             color:
               s.backgroundColor && s.textColor
                 ? {
-                    backgroundColor: s.backgroundColor,
-                    textColor: s.textColor,
-                  }
+                  backgroundColor: s.backgroundColor,
+                  textColor: s.textColor,
+                }
                 : undefined,
           });
           return {

@@ -3,6 +3,8 @@ import { getActiveConnection, getZeroDB } from '../../lib/server-utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { connection } from '../../db/schema';
+import { createDb } from '../../db';
 
 export const connectionsRouter = router({
   list: privateProcedure
@@ -68,4 +70,156 @@ export const connectionsRouter = router({
       providerId: connection.providerId,
     };
   }),
+
+  // IMAP Connection procedures
+  discoverImap: privateProcedure
+    .input(z.object({ email: z.string().email() }))
+    .mutation(async ({ input }) => {
+      const { email } = input;
+      const domain = email.split('@')[1];
+
+      // Common IMAP/SMTP settings for popular providers
+      const providerSettings: Record<string, any> = {
+        'gmail.com': {
+          imapHost: 'imap.gmail.com',
+          imapPort: 993,
+          imapSecure: true,
+          smtpHost: 'smtp.gmail.com',
+          smtpPort: 587,
+          smtpSecure: true,
+        },
+        'outlook.com': {
+          imapHost: 'outlook.office365.com',
+          imapPort: 993,
+          imapSecure: true,
+          smtpHost: 'smtp.office365.com',
+          smtpPort: 587,
+          smtpSecure: true,
+        },
+        'hotmail.com': {
+          imapHost: 'outlook.office365.com',
+          imapPort: 993,
+          imapSecure: true,
+          smtpHost: 'smtp.office365.com',
+          smtpPort: 587,
+          smtpSecure: true,
+        },
+        'yahoo.com': {
+          imapHost: 'imap.mail.yahoo.com',
+          imapPort: 993,
+          imapSecure: true,
+          smtpHost: 'smtp.mail.yahoo.com',
+          smtpPort: 587,
+          smtpSecure: true,
+        },
+        'icloud.com': {
+          imapHost: 'imap.mail.me.com',
+          imapPort: 993,
+          imapSecure: true,
+          smtpHost: 'smtp.mail.me.com',
+          smtpPort: 587,
+          smtpSecure: true,
+        },
+      };
+
+      // Check if we have settings for this provider
+      if (providerSettings[domain]) {
+        return providerSettings[domain];
+      }
+
+      // Try common patterns
+      return {
+        imapHost: `imap.${domain}`,
+        imapPort: 993,
+        imapSecure: true,
+        smtpHost: `smtp.${domain}`,
+        smtpPort: 587,
+        smtpSecure: true,
+      };
+    }),
+
+  testImap: privateProcedure
+    .input(z.object({
+      email: z.string().email(),
+      password: z.string(),
+      imapHost: z.string(),
+      imapPort: z.number(),
+      imapSecure: z.boolean(),
+      smtpHost: z.string(),
+      smtpPort: z.number(),
+      smtpSecure: z.boolean(),
+    }))
+    .mutation(async ({ input }) => {
+      console.log('[IMAP Test] Validation passed for:', input.email);
+
+      // Note: Actual IMAP connection testing happens in the separate IMAP service (apps/imap-service)
+      // This endpoint just validates the input format
+      return {
+        success: true,
+        message: 'Settings validated. Connection will be tested by the IMAP service.',
+      };
+    }),
+
+  createImap: privateProcedure
+    .input(z.object({
+      email: z.string().email(),
+      password: z.string(),
+      imapHost: z.string(),
+      imapPort: z.number(),
+      imapSecure: z.boolean(),
+      smtpHost: z.string(),
+      smtpPort: z.number(),
+      smtpSecure: z.boolean(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { email, password, imapHost, imapPort, imapSecure, smtpHost, smtpPort, smtpSecure } = input;
+      const { sessionUser, c } = ctx;
+
+      console.log('[IMAP Create] Saving connection for:', email);
+
+      // Save credentials to database using direct Postgres connection
+      // The separate IMAP service (apps/imap-service) will handle actual connections
+      const { db } = createDb(c.env.HYPERDRIVE.connectionString);
+      const newConnectionId = crypto.randomUUID();
+
+      const [newConnection] = await db
+        .insert(connection)
+        .values({
+          id: newConnectionId,
+          userId: sessionUser.id,
+          email,
+          providerId: 'imap',
+          scope: 'mail',
+          name: email,
+          config: {
+            imap: {
+              host: imapHost,
+              port: imapPort,
+              secure: imapSecure,
+            },
+            smtp: {
+              host: smtpHost,
+              port: smtpPort,
+              secure: smtpSecure,
+            },
+            auth: {
+              user: email,
+              pass: password,
+            },
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          expiresAt: null, // IMAP passwords don't expire like OAuth tokens
+        })
+        .returning();
+
+      console.log('[IMAP Create] Connection saved to database:', newConnectionId);
+
+      return {
+        id: newConnection.id,
+        email: newConnection.email,
+        success: true,
+        message: 'IMAP connection saved. The IMAP service will sync your emails.',
+      };
+    }),
 });

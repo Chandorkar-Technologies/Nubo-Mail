@@ -1,8 +1,8 @@
 import { privateProcedure, router } from '../trpc';
-import { getZeroAgent, getZeroDB } from '../../lib/server-utils';
+import { getZeroDB, getZeroAgent } from '../../lib/server-utils';
+import { z } from 'zod';
 import { getContext } from 'hono/context-storage';
 import type { HonoContext } from '../../ctx';
-import { z } from 'zod';
 
 interface Notification {
   id: string;
@@ -30,17 +30,18 @@ export const notificationsRouter = router({
       const { connectionId, types, limit } = input;
       const { sessionUser } = ctx;
 
+      // Get connection from Durable Object
       const db = await getZeroDB(sessionUser.id);
-      const executionCtx = getContext<HonoContext>().executionCtx;
-
       const connection = await db.findUserConnection(connectionId);
+
       if (!connection) {
         throw new Error('Connection not found');
       }
 
+      const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
 
-      // Query threads from database
+      // Query threads from agent's database
       const threads = await agent.db.query.threads.findMany({
         where: (thread: any, { eq }: any) => eq(thread.providerId, connectionId),
         orderBy: (thread: any, { desc }: any) => desc(thread.latestReceivedOn),
@@ -48,26 +49,30 @@ export const notificationsRouter = router({
       });
 
       const notifications: Notification[] = [];
+      const processedThreads = new Set<string>();
 
-      // Process threads to find notifications based on subject
+      // Process threads to find notifications
       for (const thread of threads) {
-        const subject = (thread.latestSubject || '').toLowerCase();
+        if (processedThreads.has(thread.id)) continue;
+        processedThreads.add(thread.id);
+
+        const subject = (thread.subject || '').toLowerCase();
+        const snippet = thread.snippet || '';
+
         const notificationTypes: Array<'mention' | 'important' | 'action_item'> = [];
 
-        // Check for important keywords in subject
+        // Check for important keywords
         if (!types || types.includes('important')) {
           const importantKeywords = ['urgent', 'asap', 'important', 'critical', 'deadline', 'priority'];
-
           if (importantKeywords.some(keyword => subject.includes(keyword))) {
             notificationTypes.push('important');
           }
         }
 
-        // Check for action items in subject
+        // Check for action items
         if (!types || types.includes('action_item')) {
           const actionKeywords = ['please', 'could you', 'can you', 'action required', 'review', 'approve'];
-
-          if (actionKeywords.some(keyword => subject.includes(keyword)) && subject.includes('?')) {
+          if (actionKeywords.some(keyword => subject.includes(keyword))) {
             notificationTypes.push('action_item');
           }
         }
@@ -76,12 +81,15 @@ export const notificationsRouter = router({
         for (const type of notificationTypes) {
           notifications.push({
             id: `${thread.id}-${type}`,
-            threadId: thread.threadId,
-            messageId: thread.id,
+            threadId: thread.id,
+            messageId: thread.latestId || thread.id,
             type,
-            title: thread.latestSubject || '(No subject)',
-            snippet: '',
-            from: thread.latestSender || null,
+            title: thread.subject || '(No subject)',
+            snippet,
+            from: {
+              name: thread.latestSender?.name,
+              address: thread.latestSender?.email || '',
+            },
             date: new Date(thread.latestReceivedOn || Date.now()),
             read: false,
             connectionId,
@@ -108,32 +116,38 @@ export const notificationsRouter = router({
       const { connectionId } = input;
       const { sessionUser } = ctx;
 
+      // Get connection from Durable Object
       const db = await getZeroDB(sessionUser.id);
-      const executionCtx = getContext<HonoContext>().executionCtx;
-
       const connection = await db.findUserConnection(connectionId);
+
       if (!connection) {
         throw new Error('Connection not found');
       }
-
-      const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
 
       let mentionCount = 0;
       let importantCount = 0;
       let actionItemCount = 0;
 
-      // Query recent threads
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
+
+      // Query threads from agent's database
       const threads = await agent.db.query.threads.findMany({
         where: (thread: any, { eq }: any) => eq(thread.providerId, connectionId),
         orderBy: (thread: any, { desc }: any) => desc(thread.latestReceivedOn),
         limit: 200,
       });
 
+      const processedThreads = new Set<string>();
+
       for (const thread of threads) {
-        const subject = (thread.latestSubject || '').toLowerCase();
+        if (processedThreads.has(thread.id)) continue;
+        processedThreads.add(thread.id);
+
+        const subject = (thread.subject || '').toLowerCase();
 
         // Count important
-        const importantKeywords = ['urgent', 'asap', 'important', 'critical', 'deadline'];
+        const importantKeywords = ['urgent', 'asap', 'important', 'critical', 'deadline', 'priority'];
         if (importantKeywords.some(keyword => subject.includes(keyword))) {
           importantCount++;
         }

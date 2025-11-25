@@ -162,33 +162,40 @@ export const kanbanRouter = router({
           const emailsWithMetadata = await Promise.all(
             emails.map(async (email) => {
               try {
-                // Fetch thread metadata from database
-                const threads = await db.rawDb.query.thread.findMany({
-                  where: (thread: any, { and, eq }: any) =>
-                    and(
-                      eq(thread.threadId, email.threadId),
-                      eq(thread.connectionId, email.connectionId)
-                    ),
+                // Fetch email metadata directly from database using createDb
+                await import('../../db');
+                const { email: emailSchema } = await import('../../db/schema');
+                const { and, eq } = await import('drizzle-orm');
+                const { env } = await import('../../env');
+                const { createDb } = await import('../../db');
+
+                const { db: dbInstance } = createDb(env.HYPERDRIVE.connectionString);
+
+                const emails = await dbInstance.query.email.findMany({
+                  where: and(
+                    eq(emailSchema.threadId, email.threadId),
+                    eq(emailSchema.connectionId, email.connectionId)
+                  ),
                   limit: 1,
                   columns: {
                     subject: true,
                     snippet: true,
-                    senderName: true,
-                    senderEmail: true,
+                    from: true,
                   },
                 });
 
-                const threadMeta = threads[0];
+                const emailMeta = emails[0];
+                const from = emailMeta?.from as { name?: string; address: string } | undefined;
 
                 return {
                   ...email,
-                  subject: threadMeta?.subject || 'No Subject',
-                  snippet: threadMeta?.snippet || '',
-                  senderName: threadMeta?.senderName || '',
-                  senderEmail: threadMeta?.senderEmail || '',
+                  subject: emailMeta?.subject || 'No Subject',
+                  snippet: emailMeta?.snippet || '',
+                  senderName: from?.name || '',
+                  senderEmail: from?.address || '',
                 };
               } catch (error) {
-                console.error('[getBoardWithColumns] Error fetching thread metadata:', error);
+                console.error('[getBoardWithColumns] Error fetching email metadata:', error);
                 return {
                   ...email,
                   subject: 'No Subject',
@@ -344,10 +351,25 @@ export const kanbanRouter = router({
       const { columnId, threadId, connectionId, position } = input;
       const { sessionUser } = ctx;
 
+      console.log('[kanban.addEmailToColumn] Input:', { columnId, threadId, connectionId, position, userId: sessionUser.id });
+
       const db = await getZeroDB(sessionUser.id);
+
+      // Verify the connection exists
+      const connection = await db.findUserConnection(connectionId);
+      if (!connection) {
+        console.error('[kanban.addEmailToColumn] Connection not found:', connectionId);
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Connection ${connectionId} not found. Please refresh the page.`
+        });
+      }
+
+      console.log('[kanban.addEmailToColumn] Connection found:', connection.email);
 
       // TODO: Verify ownership
       const [mapping] = await db.addEmailToKanbanColumn(columnId, threadId, connectionId, position);
+      console.log('[kanban.addEmailToColumn] Created mapping:', mapping.id);
       return mapping;
     }),
 
@@ -364,7 +386,24 @@ export const kanbanRouter = router({
       const { threadId, connectionId, columnId, position } = input;
       const { sessionUser } = ctx;
 
+      console.log('[kanban.moveEmail] Input:', { threadId, connectionId, columnId, position });
+
       const db = await getZeroDB(sessionUser.id);
+
+      // Verify the connection exists
+      const connection = await db.findUserConnection(connectionId);
+      console.log('[kanban.moveEmail] Connection lookup:', {
+        connectionId,
+        found: !!connection,
+        email: connection?.email
+      });
+
+      if (!connection) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Connection ${connectionId} not found. The email account may have been disconnected.`
+        });
+      }
 
       // Check if email already has a mapping
       const existing = await db.getKanbanEmailMapping(threadId, connectionId);

@@ -87,12 +87,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
       return { maxCount, shouldLoop, foundConnection };
     });
 
-    const { maxCount, shouldLoop, foundConnection } = setupResult as {
+    const { maxCount, shouldLoop } = setupResult as {
       maxCount: number;
       shouldLoop: boolean;
       foundConnection: any;
     };
-    const driver = connectionToDriver(foundConnection);
+    const driver = connectionToDriver(connection, this.env.THREADS_BUCKET);
 
     if (connectionId.includes('aggregate')) {
       console.info(

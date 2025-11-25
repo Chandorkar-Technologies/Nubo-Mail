@@ -1,7 +1,5 @@
 import { privateProcedure, router } from '../trpc';
-import { getZeroAgent, getZeroDB } from '../../lib/server-utils';
-import { getContext } from 'hono/context-storage';
-import type { HonoContext } from '../../ctx';
+import { getZeroDB } from '../../lib/server-utils';
 import { z } from 'zod';
 
 interface TeammateContact {
@@ -24,102 +22,164 @@ export const peopleRouter = router({
       })
     )
     .query(async ({ input, ctx }) => {
-      const { connectionId, minThreads } = input;
-      const { sessionUser } = ctx;
+      try {
+        const { connectionId, minThreads } = input;
+        const { sessionUser, c } = ctx;
 
-      const db = await getZeroDB(sessionUser.id);
-      const executionCtx = getContext<HonoContext>().executionCtx;
+        console.log('[getPeople] Called with connectionId:', connectionId, 'minThreads:', minThreads);
 
-      // Get connection info
-      const connection = await db.findUserConnection(connectionId);
-      if (!connection) {
-        throw new Error('Connection not found');
-      }
+        // Get connection from Durable Object to get user email
+        const db = await getZeroDB(sessionUser.id);
+        const connection = await db.findUserConnection(connectionId);
 
-      const userEmail = connection.email.toLowerCase();
-      const userDomain = userEmail.split('@')[1] || '';
+        if (!connection) {
+          console.log('[getPeople] Connection not found:', connectionId);
+          throw new Error('Connection not found');
+        }
 
-      // Get agent to access database
-      const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
+        const userEmail = connection.email.toLowerCase();
+        const userDomain = userEmail.split('@')[1] || '';
 
-      // Query threads from database
-      const threads = await agent.db.query.thread.findMany({
-        where: (thread: any, { eq }: any) => eq(thread.providerId, connectionId),
-        orderBy: (thread: any, { desc }: any) => desc(thread.latestReceivedOn),
-        limit: 500,
-      });
+        // Import schemas and query helpers for email queries
+        const { email: emailSchema } = await import('../../db/schema');
+        const { eq, desc: descFn, sql } = await import('drizzle-orm');
 
-      const contactMap = new Map<string, TeammateContact>();
+        console.log('[getPeople] Querying emails from database...');
+        console.log('[getPeople] Looking for connectionId:', connectionId);
 
-      // Process threads to extract teammates
-      for (const thread of threads) {
-        if (!thread.latestSender?.email) continue;
+        // First check total emails in database
+        const totalCount = await c.var.db
+          .select({ count: sql<number>`count(*)` })
+          .from(emailSchema);
+        console.log('[getPeople] Total emails in database:', totalCount[0]?.count);
 
-        const email = thread.latestSender.email.toLowerCase();
+        // Check emails for all connections
+        const allConnectionEmails = await c.var.db
+          .select({
+            connectionId: emailSchema.connectionId,
+            count: sql<number>`count(*)`
+          })
+          .from(emailSchema)
+          .groupBy(emailSchema.connectionId);
+        console.log('[getPeople] Emails per connection:', allConnectionEmails);
 
-        // Skip user's own email
-        if (email === userEmail) continue;
+        const emails = await c.var.db
+          .select({
+            id: emailSchema.id,
+            threadId: emailSchema.threadId,
+            from: emailSchema.from,
+            internalDate: emailSchema.internalDate,
+            subject: emailSchema.subject,
+          })
+          .from(emailSchema)
+          .where(eq(emailSchema.connectionId, connectionId))
+          .orderBy(descFn(emailSchema.internalDate))
+          .limit(1000)
+          .then(results => results.map(e => ({
+            id: e.id,
+            threadId: e.threadId,
+            from: JSON.parse(JSON.stringify(e.from)),
+            internalDate: e.internalDate,
+            subject: e.subject,
+          })));
 
-        const domain = email.split('@')[1] || '';
-        const receivedDate = new Date(thread.latestReceivedOn || Date.now());
+        console.log('[getPeople] Found emails for this connection:', emails.length);
 
-        const existingContact = contactMap.get(email);
-        if (existingContact) {
-          existingContact.threadCount++;
-          existingContact.messageCount++;
-          if (receivedDate > existingContact.lastContactDate) {
-            existingContact.lastContactDate = receivedDate;
+        const contactMap = new Map<string, TeammateContact>();
+        const threadMap = new Map<string, Set<string>>(); // threadId -> Set of unique emails
+
+        // Process emails to extract teammates
+        for (const email of emails) {
+          const from = email.from as { name?: string; address: string };
+          if (!from?.address) continue;
+
+          const emailAddress = from.address.toLowerCase();
+
+          // Skip user's own email
+          if (emailAddress === userEmail) continue;
+
+          const domain = emailAddress.split('@')[1] || '';
+          const messageDate = email.internalDate;
+
+          // Track unique threads
+          if (!threadMap.has(email.threadId)) {
+            threadMap.set(email.threadId, new Set());
           }
-        } else {
-          contactMap.set(email, {
-            email,
-            name: thread.latestSender.name || undefined,
-            domain,
-            threadCount: 1,
-            messageCount: 1,
-            lastContactDate: receivedDate,
-            isTeammate: false,
-            score: 0,
-          });
+          threadMap.get(email.threadId)!.add(emailAddress);
+
+          const existingContact = contactMap.get(emailAddress);
+          if (existingContact) {
+            existingContact.messageCount++;
+            if (messageDate > existingContact.lastContactDate) {
+              existingContact.lastContactDate = messageDate;
+            }
+          } else {
+            contactMap.set(emailAddress, {
+              email: emailAddress,
+              name: from.name || undefined,
+              domain,
+              threadCount: 0, // Will calculate after
+              messageCount: 1,
+              lastContactDate: messageDate,
+              isTeammate: false,
+              score: 0,
+            });
+          }
         }
+
+        // Calculate thread counts
+        for (const [_threadId, emailsInThread] of threadMap.entries()) {
+          for (const emailAddress of emailsInThread) {
+            const contact = contactMap.get(emailAddress);
+            if (contact) {
+              contact.threadCount++;
+            }
+          }
+        }
+
+        // Calculate scores
+        const publicDomains = new Set(['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com', 'icloud.com']);
+
+        for (const [_email, contact] of contactMap.entries()) {
+          let score = 0;
+
+          // Same domain = 50 points
+          if (contact.domain === userDomain && !publicDomains.has(userDomain)) {
+            score += 50;
+          }
+
+          // Thread count (up to 30 points)
+          score += Math.min(contact.threadCount * 2, 30);
+
+          // Message count (up to 15 points)
+          score += Math.min(contact.messageCount, 15);
+
+          // Recency (up to 5 points)
+          const daysSinceLastContact = Math.floor(
+            (Date.now() - contact.lastContactDate.getTime()) / (1000 * 60 * 60 * 24)
+          );
+          if (daysSinceLastContact <= 30) {
+            score += 5;
+          } else if (daysSinceLastContact <= 90) {
+            score += 2;
+          }
+
+          contact.score = score;
+          contact.isTeammate = score >= 40 || (contact.threadCount >= minThreads && score >= 20);
+        }
+
+        const teammates = Array.from(contactMap.values())
+          .filter((contact) => contact.isTeammate)
+          .sort((a, b) => b.score - a.score);
+
+        console.log('[getPeople] Total contacts found:', contactMap.size);
+        console.log('[getPeople] Teammates after filtering:', teammates.length);
+
+        return teammates;
+      } catch (error) {
+        console.error('[getPeople] Error:', error);
+        throw error;
       }
-
-      // Calculate scores
-      const publicDomains = new Set(['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com', 'icloud.com']);
-
-      for (const [_email, contact] of contactMap.entries()) {
-        let score = 0;
-
-        // Same domain = 50 points
-        if (contact.domain === userDomain && !publicDomains.has(userDomain)) {
-          score += 50;
-        }
-
-        // Thread count (up to 30 points)
-        score += Math.min(contact.threadCount * 2, 30);
-
-        // Message count (up to 15 points)
-        score += Math.min(contact.messageCount, 15);
-
-        // Recency (up to 5 points)
-        const daysSinceLastContact = Math.floor(
-          (Date.now() - contact.lastContactDate.getTime()) / (1000 * 60 * 60 * 24)
-        );
-        if (daysSinceLastContact <= 30) {
-          score += 5;
-        } else if (daysSinceLastContact <= 90) {
-          score += 2;
-        }
-
-        contact.score = score;
-        contact.isTeammate = score >= 40 || (contact.threadCount >= minThreads && score >= 20);
-      }
-
-      const teammates = Array.from(contactMap.values())
-        .filter((contact) => contact.isTeammate)
-        .sort((a, b) => b.score - a.score);
-
-      return teammates;
     }),
 
   getPersonThreads: privateProcedure
@@ -130,52 +190,91 @@ export const peopleRouter = router({
         limit: z.number().default(50),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const { connectionId, email, limit } = input;
+      const { c } = ctx;
 
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
+      console.log('[getPersonThreads] Querying for email:', email);
 
-      // Search for threads involving this contact using Gmail search
-      const threadsResponse = await agent.rawListThreads({
-        folder: 'inbox',
-        query: email.toLowerCase(),
-        maxResults: limit,
-        labelIds: [],
-        pageToken: '',
+      // Use the database from context
+      const { email: emailSchema } = await import('../../db/schema');
+      const { eq, desc: descFn } = await import('drizzle-orm');
+
+      const allEmails = await c.var.db
+        .select({
+          id: emailSchema.id,
+          threadId: emailSchema.threadId,
+          subject: emailSchema.subject,
+          snippet: emailSchema.snippet,
+          internalDate: emailSchema.internalDate,
+          from: emailSchema.from,
+          to: emailSchema.to,
+          cc: emailSchema.cc,
+        })
+        .from(emailSchema)
+        .where(eq(emailSchema.connectionId, connectionId))
+        .orderBy(descFn(emailSchema.internalDate))
+        .limit(500)
+        .then(results => results.map(e => ({
+          id: e.id,
+          threadId: e.threadId,
+          subject: e.subject,
+          snippet: e.snippet,
+          internalDate: e.internalDate,
+          from: JSON.parse(JSON.stringify(e.from)),
+          to: JSON.parse(JSON.stringify(e.to)),
+          cc: JSON.parse(JSON.stringify(e.cc)),
+        })));
+
+      console.log('[getPersonThreads] Queried emails:', allEmails.length);
+
+      // Filter emails where the person is in from, to, or cc
+      const targetEmail = email.toLowerCase();
+      const emails = allEmails.filter((e) => {
+        const from = e.from as { name?: string; address: string } | null;
+        const to = (e.to as { name?: string; address: string }[]) || [];
+        const cc = (e.cc as { name?: string; address: string }[]) || [];
+
+        return (
+          from?.address?.toLowerCase() === targetEmail ||
+          to.some((t) => t.address?.toLowerCase() === targetEmail) ||
+          cc.some((c) => c.address?.toLowerCase() === targetEmail)
+        );
       });
 
-      // Helper to strip HTML tags and decode entities
-      const stripHtml = (html: string): string => {
-        return html
-          .replace(/<[^>]*>/g, '') // Remove HTML tags
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/\s+/g, ' ') // Normalize whitespace
-          .trim();
-      };
+      console.log('[getPersonThreads] Filtered to:', emails.length);
 
-      return threadsResponse.threads.map((thread: any) => {
-        // Extract subject from headers
-        const headers = thread.$raw?.messages?.[0]?.payload?.headers || [];
-        const subjectHeader = headers.find((h: any) => h.name?.toLowerCase() === 'subject');
-        const subject = subjectHeader?.value || '(No subject)';
+      // Group by thread and get latest email for each thread
+      const threadMap = new Map<string, { subject: string; snippet: string; date: Date; messageCount: number }>();
 
-        // Clean snippet
-        const rawSnippet = thread.$raw?.snippet || '';
-        const snippet = stripHtml(rawSnippet);
+      for (const email of emails) {
+        if (!threadMap.has(email.threadId)) {
+          threadMap.set(email.threadId, {
+            subject: email.subject || '(No subject)',
+            snippet: email.snippet || '',
+            date: email.internalDate,
+            messageCount: 1,
+          });
+        } else {
+          const thread = threadMap.get(email.threadId)!;
+          thread.messageCount++;
+          // Keep the latest date
+          if (email.internalDate > thread.date) {
+            thread.date = email.internalDate;
+          }
+        }
+      }
 
-        return {
-          threadId: thread.id,
-          subject,
-          snippet,
-          date: thread.$raw?.messages?.[0]?.internalDate || Date.now(),
-          messageCount: thread.$raw?.messages?.length || 1,
-        };
-      }).sort((a: any, b: any) => Number(b.date) - Number(a.date));
+      const threads = Array.from(threadMap.entries())
+        .map(([threadId, data]) => ({
+          threadId,
+          ...data,
+        }))
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .slice(0, limit);
+
+      console.log('[getPersonThreads] Returning threads:', threads.length);
+
+      return threads;
     }),
 });

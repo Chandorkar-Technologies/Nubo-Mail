@@ -320,7 +320,7 @@ export class ShardRegistry extends DurableObject<ZeroEnv> {
 export class ZeroDriver extends DurableObject<ZeroEnv> {
   transfer = new Transfer(this);
   sql: SqlStorage;
-  private db: DB;
+  db: DB; // Made public for access in TRPC routes
   private syncThreadsInProgress: Map<string, boolean> = new Map();
   private driver: MailManager | null = null;
   private agent: DurableObjectStub<ZeroAgent> | null = null;
@@ -705,7 +705,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         where: eq(connection.id, this.name),
       });
       if (_connection) {
-        this.driver = connectionToDriver(_connection);
+        this.driver = connectionToDriver(_connection, this.env.THREADS_BUCKET);
         this.connection = _connection;
       }
       this.ctx.waitUntil(conn.end());
@@ -753,6 +753,27 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       throw new Error('No driver available');
     }
     return await this.getThreadFromDB(threadId, includeDrafts);
+  }
+
+  async getThreadsForPeople(params: { limit?: number }) {
+    const { limit = 500 } = params;
+
+    try {
+      const threads = await this.db.query.threads.findMany({
+        orderBy: (thread, { desc }) => desc(thread.latestReceivedOn),
+        limit,
+        columns: {
+          id: true,
+          latestReceivedOn: true,
+          latestSender: true,
+        },
+      });
+
+      return threads;
+    } catch (error) {
+      console.error('[getThreadsForPeople] Error querying threads:', error);
+      throw error;
+    }
   }
 
   //   async markThreadsRead(threadIds: string[]) {

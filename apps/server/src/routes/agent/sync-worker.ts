@@ -12,14 +12,14 @@ export class ThreadSyncWorker extends DurableObject<ZeroEnv> {
   }
 
   private getThreadKey(connectionId: string, threadId: string) {
-    return `${connectionId}/${threadId}.json`;
+    return `thread-cache/${connectionId}/${threadId}.json`;
   }
 
   public async syncThread(
     connection: typeof connectionSchema.$inferSelect,
     threadId: string,
   ): Promise<ParsedMessage | undefined> {
-    const driver = connectionToDriver(connection);
+    const driver = connectionToDriver(connection, this.env.THREADS_BUCKET);
     if (!driver) throw new Error('No driver available');
 
     const thread = await Effect.runPromise(

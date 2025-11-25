@@ -51,7 +51,14 @@ export const privateProcedure = publicProcedure.use(async ({ ctx, next }) => {
     });
   }
 
-  return next({ ctx: { ...ctx, sessionUser: ctx.sessionUser } });
+  if (!ctx.db) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Database connection not available',
+    });
+  }
+
+  return next({ ctx: { ...ctx, sessionUser: ctx.sessionUser, db: ctx.db } });
 });
 
 export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next }) => {

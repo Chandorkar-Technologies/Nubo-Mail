@@ -412,6 +412,7 @@ export class OutlookMailManager implements MailManager {
           latest: fullEmailData,
           hasUnread: parsedData.unread,
           totalReplies: 1,
+          connectionId: this.config.connectionId,
         };
       },
       { id, email: this.config.auth?.email },
@@ -1014,9 +1015,9 @@ export class OutlookMailManager implements MailManager {
     const receivedOn = receivedDateTime || new Date().toISOString();
     const sender = from?.emailAddress
       ? {
-          name: from.emailAddress.name || '',
-          email: from.emailAddress.address || '',
-        }
+        name: from.emailAddress.name || '',
+        email: from.emailAddress.address || '',
+      }
       : { name: 'Unknown', email: 'unknown@example.com' };
 
     const to =
@@ -1290,5 +1291,11 @@ export class OutlookMailManager implements MailManager {
   }
   listHistory<T>(historyId: string): Promise<{ history: T[]; historyId: string }> {
     return Promise.resolve({ history: [], historyId });
+  }
+  public async getMessageAttachments(_id: string) {
+    return [];
+  }
+  public async getRawEmail(_id: string) {
+    return '';
   }
 }

@@ -7,6 +7,7 @@ import {
   modifyThreadLabelsInDB,
   deleteAllSpam,
   reSyncThread,
+  connectionToDriver,
 } from '../../lib/server-utils';
 import {
   IGetThreadResponseSchema,
@@ -68,6 +69,12 @@ export const mailRouter = router({
     .output(IGetThreadResponseSchema)
     .query(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
+
+      if (activeConnection.providerId === 'imap') {
+        const driver = connectionToDriver(activeConnection, env.THREADS_BUCKET);
+        return await driver.get(input.id);
+      }
+
       const result = await getThread(activeConnection.id, input.id);
       return result.result;
     }),
@@ -88,6 +95,17 @@ export const mailRouter = router({
       const executionCtx = getContext<HonoContext>().executionCtx;
 
       console.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
+
+      if (activeConnection.providerId === 'imap') {
+        const driver = connectionToDriver(activeConnection, env.THREADS_BUCKET);
+        return await driver.list({
+          folder,
+          query: q,
+          maxResults,
+          pageToken: cursor,
+          labelIds,
+        });
+      }
 
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
 

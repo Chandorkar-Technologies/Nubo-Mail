@@ -394,6 +394,7 @@ export class GoogleMailManager implements MailManager {
             hasUnread: false,
             totalReplies: 0,
             labels: [],
+            connectionId: this.config.connectionId,
           };
         let hasUnread = false;
         const labels = new Set<string>();
@@ -501,6 +502,7 @@ export class GoogleMailManager implements MailManager {
           latest: messages.findLast((e) => e.isDraft !== true),
           hasUnread,
           totalReplies: messages.filter((e) => !e.isDraft).length,
+          connectionId: this.config.connectionId,
         };
       },
       { id, email: this.config.auth?.email },
