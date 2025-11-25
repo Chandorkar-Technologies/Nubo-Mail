@@ -536,7 +536,7 @@ export default function DrivePage() {
   const breadcrumbs = folderData?.breadcrumbs || [];
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-screen flex-col bg-background">
       {/* Header */}
       <div className="border-b p-4">
         <div className="flex items-center justify-between">
