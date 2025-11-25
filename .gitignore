@@ -63,3 +63,7 @@ tools.json
 
 # secrets
 **/push-production-secrets.sh
+
+# local development SQL scripts
+activate-premium-local.sql
+diagnose-imap.sql
