@@ -15,7 +15,9 @@ import {
   LockIcon,
   Clock,
 } from '@/components/icons/icons';
-import { MessageSquareIcon, KanbanSquare, UserCircle, Bell, Paperclip, Video } from 'lucide-react';
+import { MessageSquareIcon, Video } from 'lucide-react';
+// Temporarily unused imports for hidden features:
+// import { KanbanSquare, UserCircle, Bell, Paperclip } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 
 export interface NavItem {
@@ -79,39 +81,40 @@ export const navigationConfig: Record<string, NavConfig> = {
           },
         ],
       },
-      {
-        title: 'Views',
-        items: [
-          {
-            id: 'kanban',
-            title: m['navigation.sidebar.kanban'](),
-            url: '/mail/kanban',
-            icon: KanbanSquare,
-            shortcut: 'g + k',
-          },
-          {
-            id: 'people',
-            title: m['navigation.sidebar.people'](),
-            url: '/mail/teammates',
-            icon: UserCircle,
-            shortcut: 'g + p',
-          },
-          {
-            id: 'notifications',
-            title: m['navigation.sidebar.notifications'](),
-            url: '/mail/notifications',
-            icon: Bell,
-            shortcut: 'g + n',
-          },
-          {
-            id: 'attachments',
-            title: m['navigation.sidebar.attachments'](),
-            url: '/mail/attachments',
-            icon: Paperclip,
-            shortcut: 'g + f',
-          },
-        ],
-      },
+      // Views section temporarily hidden - these features are under development
+      // {
+      //   title: 'Views',
+      //   items: [
+      //     {
+      //       id: 'kanban',
+      //       title: m['navigation.sidebar.kanban'](),
+      //       url: '/mail/kanban',
+      //       icon: KanbanSquare,
+      //       shortcut: 'g + k',
+      //     },
+      //     {
+      //       id: 'people',
+      //       title: m['navigation.sidebar.people'](),
+      //       url: '/mail/teammates',
+      //       icon: UserCircle,
+      //       shortcut: 'g + p',
+      //     },
+      //     {
+      //       id: 'notifications',
+      //       title: m['navigation.sidebar.notifications'](),
+      //       url: '/mail/notifications',
+      //       icon: Bell,
+      //       shortcut: 'g + n',
+      //     },
+      //     {
+      //       id: 'attachments',
+      //       title: m['navigation.sidebar.attachments'](),
+      //       url: '/mail/attachments',
+      //       icon: Paperclip,
+      //       shortcut: 'g + f',
+      //     },
+      //   ],
+      // },
       {
         title: 'Management',
         items: [
