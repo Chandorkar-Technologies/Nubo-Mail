@@ -57,6 +57,7 @@ import { cors } from 'hono/cors';
 import { Effect } from 'effect';
 import { Hono } from 'hono';
 import { imapRouter } from './routes/imap';
+import { driveApiRouter } from './routes/drive';
 import PostalMime from 'postal-mime';
 
 const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
@@ -1042,6 +1043,7 @@ const api = new Hono<HonoContext>()
   })
   .route('/ai', aiRouter)
   .route('/connections/imap', imapRouter)
+  .route('/drive', driveApiRouter)
   .route('/razorpay', razorpayApi)
   .route('/public', publicRouter)
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {

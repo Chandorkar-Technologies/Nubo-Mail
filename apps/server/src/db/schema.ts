@@ -542,3 +542,86 @@ export const emailTemplate = createTable(
     unique('mail0_email_template_user_id_name_unique').on(t.userId, t.name),
   ],
 );
+
+// Nubo Drive - Cloud Storage
+export const driveFolder = createTable(
+  'drive_folder',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    parentId: text('parent_id'), // null for root folders
+    color: text('color'), // optional folder color
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('drive_folder_user_id_idx').on(t.userId),
+    index('drive_folder_parent_id_idx').on(t.parentId),
+    index('drive_folder_user_parent_idx').on(t.userId, t.parentId),
+  ],
+);
+
+export const driveFile = createTable(
+  'drive_file',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    folderId: text('folder_id').references(() => driveFolder.id, { onDelete: 'set null' }), // null for root
+    name: text('name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    size: integer('size').notNull(), // bytes
+    r2Key: text('r2_key').notNull(), // path in R2 bucket: drive/{userId}/{fileId}/{filename}
+    thumbnailR2Key: text('thumbnail_r2_key'), // optional thumbnail for images/docs
+    // Import tracking
+    importSource: text('import_source'), // 'google_drive', 'onedrive', 'upload', 'email_attachment'
+    sourceFileId: text('source_file_id'), // original file ID from source (for deduplication)
+    // Metadata
+    isStarred: boolean('is_starred').default(false),
+    isTrashed: boolean('is_trashed').default(false),
+    trashedAt: timestamp('trashed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('drive_file_user_id_idx').on(t.userId),
+    index('drive_file_folder_id_idx').on(t.folderId),
+    index('drive_file_user_folder_idx').on(t.userId, t.folderId),
+    index('drive_file_mime_type_idx').on(t.mimeType),
+    index('drive_file_is_trashed_idx').on(t.isTrashed),
+    index('drive_file_is_starred_idx').on(t.isStarred),
+    index('drive_file_import_source_idx').on(t.importSource, t.sourceFileId),
+  ],
+);
+
+// Track import jobs from Google Drive / OneDrive
+export const driveImportJob = createTable(
+  'drive_import_job',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(), // 'google_drive', 'onedrive'
+    status: text('status').notNull().default('pending'), // 'pending', 'in_progress', 'completed', 'failed'
+    totalFiles: integer('total_files').default(0),
+    processedFiles: integer('processed_files').default(0),
+    failedFiles: integer('failed_files').default(0),
+    errorMessage: text('error_message'),
+    // Store selected file IDs from source
+    sourceFileIds: jsonb('source_file_ids').$type<string[]>(),
+    targetFolderId: text('target_folder_id').references(() => driveFolder.id, { onDelete: 'set null' }),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('drive_import_job_user_id_idx').on(t.userId),
+    index('drive_import_job_status_idx').on(t.status),
+    index('drive_import_job_source_idx').on(t.source),
+  ],
+);

@@ -105,6 +105,9 @@ export type ZeroEnv = {
   DD_API_KEY: string;
   DD_APP_KEY: string;
   DD_SITE: string;
+  // OnlyOffice Document Server
+  ONLYOFFICE_URL: string;
+  ONLYOFFICE_JWT_SECRET?: string;
 };
 
 const env = _env as ZeroEnv;

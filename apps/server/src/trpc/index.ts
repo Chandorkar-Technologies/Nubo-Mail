@@ -22,6 +22,7 @@ import { kanbanRouter } from './routes/kanban';
 import { peopleRouter } from './routes/teammates'; // Renamed from teammates to people
 import { notificationsRouter } from './routes/notifications';
 import { attachmentsRouter } from './routes/attachments';
+import { driveRouter } from './routes/drive';
 
 export const appRouter = router({
   ai: aiRouter,
@@ -32,6 +33,7 @@ export const appRouter = router({
   connections: connectionsRouter,
   cookiePreferences: cookiePreferencesRouter,
   drafts: draftsRouter,
+  drive: driveRouter,
   kanban: kanbanRouter,
   labels: labelsRouter,
   mail: mailRouter,

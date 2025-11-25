@@ -288,6 +288,13 @@
       "when": 1764056242192,
       "tag": "0039_careless_lady_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1764091358138,
+      "tag": "0040_special_spencer_smythe",
+      "breakpoints": true
     }
   ]
 }
