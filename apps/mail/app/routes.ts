@@ -25,6 +25,8 @@ export default [
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
     route('/meet', '(routes)/meet/page.tsx'),
+    route('/drive', '(routes)/drive/page.tsx'),
+    route('/drive/edit/:fileId', '(routes)/drive/edit/[fileId]/page.tsx'),
     layout(
       '(routes)/mail/layout.tsx',
       prefix('/mail', [

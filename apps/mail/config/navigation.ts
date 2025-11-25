@@ -15,7 +15,7 @@ import {
   LockIcon,
   Clock,
 } from '@/components/icons/icons';
-import { MessageSquareIcon, Video } from 'lucide-react';
+import { MessageSquareIcon, Video, HardDrive } from 'lucide-react';
 // Temporarily unused imports for hidden features:
 // import { KanbanSquare, UserCircle, Bell, Paperclip } from 'lucide-react';
 import { m } from '@/paraglide/messages';
@@ -78,6 +78,13 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/meet',
             icon: Video,
             shortcut: 'g + v',
+          },
+          {
+            id: 'drive',
+            title: 'Nubo Drive',
+            url: '/drive',
+            icon: HardDrive,
+            shortcut: 'g + r',
           },
         ],
       },
