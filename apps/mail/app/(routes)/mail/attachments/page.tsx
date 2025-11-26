@@ -189,22 +189,21 @@ export default function AttachmentsPage() {
                   className="flex-1"
                   onClick={(e) => {
                     e.stopPropagation();
-                    // View attachment - navigate to thread
+                    // View attachment - navigate to email thread where the attachment is
                     handleAttachmentClick(attachment);
                   }}
                 >
                   <Eye className="mr-1 h-3 w-3" />
-                  View
+                  View in Email
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled
                   onClick={(e) => {
                     e.stopPropagation();
-                    // Download functionality would go here
-                    // This requires calling the Gmail API to download the attachment
                   }}
-                  title="Download attachment"
+                  title="Download not yet available for IMAP attachments"
                 >
                   <Download className="h-3 w-3" />
                 </Button>

@@ -2,8 +2,9 @@ import { useTRPC } from '@/providers/query-provider';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Loader2, Trash2, ArrowLeft } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Select,
   SelectContent,
@@ -15,6 +16,7 @@ import {
 export default function KanbanPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
 
   // Get all connections to allow board creation per connection
@@ -131,22 +133,28 @@ export default function KanbanPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between border-b px-4 sm:px-6 py-3 flex-shrink-0">
-        <Select
-          value={currentBoard?.id || ''}
-          onValueChange={setSelectedBoardId}
-        >
-          <SelectTrigger className="w-full sm:w-[200px]">
-            <SelectValue placeholder="Select board" />
-          </SelectTrigger>
-          <SelectContent>
-            {boards.map((board) => (
-              <SelectItem key={board.id} value={board.id}>
-                {board.name}
-                {board.isDefault && ' (Default)'}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/mail/inbox')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Inbox
+          </Button>
+          <Select
+            value={currentBoard?.id || ''}
+            onValueChange={setSelectedBoardId}
+          >
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Select board" />
+            </SelectTrigger>
+            <SelectContent>
+              {boards.map((board) => (
+                <SelectItem key={board.id} value={board.id}>
+                  {board.name}
+                  {board.isDefault && ' (Default)'}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <div className="flex flex-wrap gap-2">
           <Button
