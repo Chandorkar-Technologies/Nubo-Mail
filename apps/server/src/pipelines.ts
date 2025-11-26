@@ -18,7 +18,8 @@ import {
 import { getServiceAccount } from './lib/factories/google-subscription.factory';
 import { getThread, getZeroAgent } from './lib/server-utils';
 import { DurableObject } from 'cloudflare:workers';
-import { bulkDeleteKeys } from './lib/bulk-delete';
+// bulkDeleteKeys is lazy-loaded to avoid bundling the massive cloudflare SDK at startup
+const getBulkDeleteKeys = async () => (await import('./lib/bulk-delete')).bulkDeleteKeys;
 import { type gmail_v1 } from '@googleapis/gmail';
 import { Effect, Console, Logger } from 'effect';
 import { connection } from './db/schema';
@@ -515,7 +516,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           yield* Effect.tryPromise({
             try: async () => {
               console.log('[ZERO_WORKFLOW] Bulk deleting keys:', keysToDelete);
-              const result = await bulkDeleteKeys(keysToDelete);
+              const result = await (await getBulkDeleteKeys())(keysToDelete);
               console.log('[ZERO_WORKFLOW] Bulk delete result:', result);
               return result;
             },
@@ -545,7 +546,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               '[ZERO_WORKFLOW] Clearing processing flag for history after error:',
               errorCleanupKey,
             );
-            const result = await bulkDeleteKeys([errorCleanupKey]);
+            const result = await (await getBulkDeleteKeys())([errorCleanupKey]);
             console.log('[ZERO_WORKFLOW] Error cleanup result:', result);
             return result;
           },
@@ -670,7 +671,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           yield* Effect.tryPromise({
             try: async () => {
               console.log('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
-              const result = await bulkDeleteKeys(keysToDelete);
+              const result = await (await getBulkDeleteKeys())(keysToDelete);
               console.log('[THREAD_WORKFLOW] Bulk delete result:', result);
               return result;
             },
@@ -699,7 +700,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
               params.threadId,
             );
-            const result = await bulkDeleteKeys([params.threadId.toString()]);
+            const result = await (await getBulkDeleteKeys())([params.threadId.toString()]);
             console.log('[THREAD_WORKFLOW] Error cleanup result:', result);
             return result;
           },
@@ -840,7 +841,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         if (keysToDelete.length > 0) {
           try {
             console.log('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
-            const result = await bulkDeleteKeys(keysToDelete);
+            const result = await (await getBulkDeleteKeys())(keysToDelete);
             console.log('[THREAD_WORKFLOW] Bulk delete result:', result);
           } catch (error) {
             console.error('[THREAD_WORKFLOW] Failed to bulk delete keys:', error);
@@ -861,7 +862,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
           params.threadId,
         );
-        const result = await bulkDeleteKeys([params.threadId.toString()]);
+        const result = await (await getBulkDeleteKeys())([params.threadId.toString()]);
         console.log('[THREAD_WORKFLOW] Error cleanup result:', result);
       } catch (cleanupError) {
         console.error('[THREAD_WORKFLOW] Failed to cleanup thread processing flag:', cleanupError);
