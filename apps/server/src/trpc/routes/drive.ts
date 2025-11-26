@@ -573,7 +573,7 @@ export const driveRouter = router({
     };
   }),
 
-  // Get OnlyOffice editor config for a file
+  // Get OnlyOffice Document Server editor config for a file
   getEditorConfig: privateProcedure
     .input(z.object({ fileId: z.string() }))
     .mutation(async ({ input, ctx }) => {
@@ -594,6 +594,13 @@ export const driveRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not supported for editing' });
       }
 
+      const onlyOfficeUrl = env.ONLYOFFICE_URL || 'https://office.nubo.email';
+      const jwtSecret = env.ONLYOFFICE_JWT_SECRET;
+
+      if (!jwtSecret) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'OnlyOffice JWT secret not configured' });
+      }
+
       const ext = getFileExtension(file.name);
       const documentType = ['doc', 'docx', 'odt', 'rtf', 'txt'].includes(ext)
         ? 'word'
@@ -601,7 +608,7 @@ export const driveRouter = router({
           ? 'cell'
           : ['ppt', 'pptx', 'odp'].includes(ext)
             ? 'slide'
-            : 'word'; // default to word for PDF etc
+            : 'word';
 
       // Generate unique key for this editing session
       const documentKey = `${file.id}-${file.updatedAt.getTime()}`;
@@ -616,7 +623,7 @@ export const driveRouter = router({
         },
         documentType,
         editorConfig: {
-          callbackUrl: `${env.VITE_PUBLIC_BACKEND_URL}/api/onlyoffice/callback`,
+          callbackUrl: `${env.VITE_PUBLIC_BACKEND_URL}/api/drive/onlyoffice/callback`,
           user: {
             id: sessionUser.id,
             name: sessionUser.name || sessionUser.email,
@@ -628,9 +635,39 @@ export const driveRouter = router({
         },
       };
 
+      // Sign the config with JWT
+      // Using a simple base64 encoding for the JWT payload
+      // In production, use a proper JWT library
+      const header = { alg: 'HS256', typ: 'JWT' };
+      const base64Header = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+      const base64Payload = btoa(JSON.stringify(config)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+      // Create signature using Web Crypto API
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(jwtSecret);
+      const key = await crypto.subtle.importKey(
+        'raw',
+        keyData,
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      );
+      const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        encoder.encode(`${base64Header}.${base64Payload}`)
+      );
+      const base64Signature = btoa(String.fromCharCode(...new Uint8Array(signature)))
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+      const token = `${base64Header}.${base64Payload}.${base64Signature}`;
+
       return {
-        config,
-        onlyOfficeUrl: env.ONLYOFFICE_URL || 'http://157.180.65.242',
+        config: {
+          ...config,
+          token,
+        },
+        onlyOfficeUrl,
       };
     }),
 

@@ -8,7 +8,9 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 declare global {
   interface Window {
     DocsAPI?: {
-      DocEditor: new (elementId: string, config: any) => any;
+      DocEditor: new (elementId: string, config: any) => {
+        destroyEditor: () => void;
+      };
     };
   }
 }
@@ -17,14 +19,13 @@ export default function EditorPage() {
   const { fileId } = useParams();
   const navigate = useNavigate();
   const trpc = useTRPC();
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<{ destroyEditor: () => void } | null>(null);
   const [editorLoaded, setEditorLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Get file details
   const { data: file } = useQuery(
-    trpc.drive.getFile.queryOptions({ fileId: fileId! }),
-    { enabled: !!fileId },
+    trpc.drive.getFile.queryOptions({ fileId: fileId! }, { enabled: !!fileId }),
   );
 
   // Get editor config
@@ -35,68 +36,102 @@ export default function EditorPage() {
   useEffect(() => {
     if (!fileId) return;
 
-    let editorInstance: any = null;
+    let mounted = true;
+    let scriptElement: HTMLScriptElement | null = null;
 
     const initEditor = async () => {
       try {
         const { config, onlyOfficeUrl } = await getEditorConfig({ fileId });
 
-        // Load OnlyOffice API script
+        if (!mounted) return;
+
+        // Load OnlyOffice Document Server API script
         const script = document.createElement('script');
         script.src = `${onlyOfficeUrl}/web-apps/apps/api/documents/api.js`;
         script.async = true;
 
         script.onload = () => {
-          if (window.DocsAPI && editorRef.current) {
-            editorInstance = new window.DocsAPI.DocEditor('onlyoffice-editor', {
+          if (!mounted) return;
+
+          if (!window.DocsAPI) {
+            setError('Failed to load OnlyOffice editor API');
+            return;
+          }
+
+          try {
+            // Initialize the editor
+            const editor = new window.DocsAPI.DocEditor('onlyoffice-editor', {
               ...config,
               width: '100%',
               height: '100%',
               events: {
                 onAppReady: () => {
-                  setEditorLoaded(true);
+                  if (mounted) {
+                    setEditorLoaded(true);
+                  }
                 },
-                onDocumentStateChange: (event: any) => {
-                  // Document modified
-                  console.log('Document state changed:', event);
+                onDocumentStateChange: (event: { data: boolean }) => {
+                  // event.data is true when document is modified
+                  console.log('Document modified:', event.data);
                 },
-                onError: (event: any) => {
-                  console.error('OnlyOffice error:', event);
-                  setError('Editor error occurred');
+                onError: (event: { data: { errorCode: number; errorDescription: string } }) => {
+                  console.error('OnlyOffice error:', event.data);
+                  if (mounted) {
+                    setError(`Editor error: ${event.data.errorDescription}`);
+                  }
                 },
               },
             });
+
+            editorRef.current = editor;
+          } catch (initError) {
+            console.error('Failed to initialize editor:', initError);
+            if (mounted) {
+              setError('Failed to initialize editor');
+            }
           }
         };
 
         script.onerror = () => {
-          setError('Failed to load OnlyOffice editor');
+          console.error('Failed to load OnlyOffice API script');
+          if (mounted) {
+            setError('Failed to load OnlyOffice editor. Please check the server configuration.');
+          }
         };
 
         document.body.appendChild(script);
-
-        return () => {
-          if (editorInstance) {
-            editorInstance.destroyEditor?.();
-          }
-          document.body.removeChild(script);
-        };
+        scriptElement = script;
       } catch (err) {
-        console.error('Failed to initialize editor:', err);
-        setError('Failed to initialize editor');
+        console.error('Failed to get editor config:', err);
+        if (mounted) {
+          setError('Failed to initialize editor');
+        }
       }
     };
 
     initEditor();
 
     return () => {
-      // Cleanup will be handled by the async function
+      mounted = false;
+      // Destroy editor instance
+      if (editorRef.current) {
+        try {
+          editorRef.current.destroyEditor();
+        } catch (e) {
+          console.error('Error destroying editor:', e);
+        }
+        editorRef.current = null;
+      }
+      // Remove script
+      if (scriptElement && scriptElement.parentNode) {
+        scriptElement.parentNode.removeChild(scriptElement);
+      }
     };
   }, [fileId, getEditorConfig]);
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4">
+      <div className="flex h-screen w-full flex-col items-center justify-center gap-4 bg-background">
         <p className="text-destructive">{error}</p>
         <Button onClick={() => navigate('/drive')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -107,7 +142,7 @@ export default function EditorPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-screen w-full flex-col bg-background">
       {/* Header */}
       <div className="flex items-center gap-4 border-b p-2">
         <Button variant="ghost" size="sm" onClick={() => navigate('/drive')}>
@@ -134,7 +169,6 @@ export default function EditorPage() {
         )}
         <div
           id="onlyoffice-editor"
-          ref={editorRef}
           className="h-full w-full"
         />
       </div>

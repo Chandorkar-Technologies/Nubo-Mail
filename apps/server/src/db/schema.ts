@@ -9,6 +9,7 @@ import {
   unique,
   index,
 } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 import { defaultUserSettings } from '../lib/schemas';
 
 export const createTable = pgTableCreator((name) => `mail0_${name}`);
@@ -209,6 +210,7 @@ export const email = createTable(
     isRead: boolean('is_read').default(false),
     isStarred: boolean('is_starred').default(false),
     labels: jsonb('labels'), // IMAP folders/labels
+    attachments: jsonb('attachments'), // [{ filename, contentType, size, contentId, r2Key }]
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -625,3 +627,40 @@ export const driveImportJob = createTable(
     index('drive_import_job_source_idx').on(t.source),
   ],
 );
+
+// Drizzle relations for drive tables (required for ctx.db.query API)
+export const driveFolderRelations = relations(driveFolder, ({ one, many }) => ({
+  user: one(user, {
+    fields: [driveFolder.userId],
+    references: [user.id],
+  }),
+  parent: one(driveFolder, {
+    fields: [driveFolder.parentId],
+    references: [driveFolder.id],
+    relationName: 'folderHierarchy',
+  }),
+  children: many(driveFolder, { relationName: 'folderHierarchy' }),
+  files: many(driveFile),
+}));
+
+export const driveFileRelations = relations(driveFile, ({ one }) => ({
+  user: one(user, {
+    fields: [driveFile.userId],
+    references: [user.id],
+  }),
+  folder: one(driveFolder, {
+    fields: [driveFile.folderId],
+    references: [driveFolder.id],
+  }),
+}));
+
+export const driveImportJobRelations = relations(driveImportJob, ({ one }) => ({
+  user: one(user, {
+    fields: [driveImportJob.userId],
+    references: [user.id],
+  }),
+  targetFolder: one(driveFolder, {
+    fields: [driveImportJob.targetFolderId],
+    references: [driveFolder.id],
+  }),
+}));

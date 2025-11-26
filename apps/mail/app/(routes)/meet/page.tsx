@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Video, Calendar, Users, Clock, Plus, Share2, Trash2 } from 'lucide-react';
+import { Video, Calendar, Users, Clock, Plus, Share2, Trash2, ArrowLeft } from 'lucide-react';
 import { CreateMeetingDialog } from '@/components/livekit/create-meeting-dialog';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -83,9 +83,15 @@ export default function MeetingsPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Meetings</h1>
-          <p className="text-muted-foreground">Manage your video meetings</p>
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/mail/inbox')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Inbox
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Meetings</h1>
+            <p className="text-muted-foreground">Manage your video meetings</p>
+          </div>
         </div>
         <Button onClick={() => setIsCreateDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />

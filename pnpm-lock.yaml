@@ -189,6 +189,9 @@ importers:
       '@livekit/components-styles':
         specifier: 1.2.0
         version: 1.2.0
+      '@onlyoffice/docspace-sdk-js':
+        specifier: 2.1.0
+        version: 2.1.0
       '@radix-ui/react-alert-dialog':
         specifier: 1.1.15
         version: 1.1.15(@types/react-dom@19.0.4(@types/react@19.0.10))(@types/react@19.0.10)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -2730,6 +2733,10 @@ packages:
 
   '@one-ini/wasm@0.1.1':
     resolution: {integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==}
+
+  '@onlyoffice/docspace-sdk-js@2.1.0':
+    resolution: {integrity: sha512-Jgqr6LblkWIW/m8OH1z8qm6DQ6AhoW07oMhQYSHZFVvwLEtTP0tMryZ+pOuXOCoh4/XHF/AwSKETkj89W0xgmw==}
+    engines: {node: '>=22', pnpm: '>=10'}
 
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
@@ -13269,6 +13276,8 @@ snapshots:
       which: 3.0.1
 
   '@one-ini/wasm@0.1.1': {}
+
+  '@onlyoffice/docspace-sdk-js@2.1.0': {}
 
   '@open-draft/deferred-promise@2.2.0': {}
 

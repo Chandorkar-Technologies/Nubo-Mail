@@ -47,10 +47,43 @@ export class SyncEngine {
 
             const lock = await client.getMailboxLock('INBOX');
             try {
-                // Fetch latest messages
-                // TODO: Use uidValidity and modseq for incremental sync in future
-                // For now, fetching last 20 messages to demonstrate flow
-                for await (const message of client.fetch('1:*', { envelope: true, source: true, uid: true })) {
+                // Get current mailbox status
+                const mailboxStatus = client.mailbox;
+                const currentUidValidity = mailboxStatus?.uidValidity ?? 0;
+
+                // Get saved sync state
+                const syncState = await this.db.getSyncState(conn.id);
+                let startUid = 1;
+
+                // Check if uidValidity changed (mailbox was recreated)
+                if (syncState) {
+                    if (syncState.uidValidity !== currentUidValidity) {
+                        // UIDVALIDITY changed - mailbox was recreated, need full resync
+                        this.logger.warn(`UIDVALIDITY changed for ${conn.id} (was ${syncState.uidValidity}, now ${currentUidValidity}). Performing full resync.`);
+                        await this.db.resetSyncState(conn.id);
+                        startUid = 1;
+                    } else {
+                        // Resume from last synced UID + 1
+                        startUid = syncState.lastSyncedUid + 1;
+                        this.logger.info(`Resuming sync from UID ${startUid} for connection ${conn.id}`);
+                    }
+                } else {
+                    this.logger.info(`First sync for connection ${conn.id}, starting from UID 1`);
+                }
+
+                // Fetch only new messages (from startUid to the latest)
+                const fetchRange = `${startUid}:*`;
+                let maxSyncedUid = syncState?.lastSyncedUid ?? 0;
+                let syncedCount = 0;
+
+                this.logger.info(`Fetching messages in range ${fetchRange}`);
+
+                for await (const message of client.fetch(fetchRange, { envelope: true, source: true, uid: true })) {
+                    // Skip messages we've already synced (can happen if startUid is greater than any existing UID)
+                    if (message.uid <= (syncState?.lastSyncedUid ?? 0)) {
+                        continue;
+                    }
+
                     if (!message.source) {
                         continue;
                     }
@@ -62,7 +95,7 @@ export class SyncEngine {
                     }
 
                     const threadId = message.uid.toString(); // Simple thread ID for now
-                    const messageId = message.envelope.messageId || `${threadId}@${config.host}`;
+                    const messageId = message.envelope.messageId || `${threadId}@${config.imap.host}`;
 
                     // 1. Save body to R2
                     const emailBodyData = {
@@ -80,9 +113,21 @@ export class SyncEngine {
 
                     const bodyR2Key = await this.store.saveEmail(conn.id, threadId, emailBodyData);
 
+                    // Extract attachment metadata
+                    const attachments = (parsed.attachments || []).map((att, idx) => ({
+                        id: `${conn.id}-${message.uid}-att-${idx}`,
+                        filename: att.filename || `attachment-${idx}`,
+                        contentType: att.contentType || 'application/octet-stream',
+                        size: att.size || 0,
+                        contentId: att.contentId || null,
+                        // Note: We're storing metadata only, not the actual file content
+                        // Content could be stored to R2 if needed in the future
+                    }));
+
                     // 2. Save metadata to Postgres
+                    // Use a deterministic ID based on connectionId and UID to prevent duplicates
                     const emailMetadata = {
-                        id: crypto.randomUUID(), // Internal ID
+                        id: `${conn.id}-${message.uid}`,
                         threadId: threadId,
                         connectionId: conn.id,
                         messageId: messageId,
@@ -101,10 +146,42 @@ export class SyncEngine {
                         isRead: message.flags?.has('\\Seen') ?? false,
                         isStarred: message.flags?.has('\\Flagged') ?? false,
                         labels: ['INBOX'], // Default label
+                        attachments: attachments,
                     };
 
                     await this.db.saveEmailMetadata(emailMetadata);
-                    this.logger.info(`Saved email ${message.uid}`);
+
+                    // Track the highest UID we've synced
+                    if (message.uid > maxSyncedUid) {
+                        maxSyncedUid = message.uid;
+                    }
+                    syncedCount++;
+
+                    this.logger.info(`Saved email UID ${message.uid}`);
+                }
+
+                // Update sync state with the highest UID we processed
+                if (maxSyncedUid > 0) {
+                    try {
+                        await this.db.updateSyncState(conn.id, maxSyncedUid, currentUidValidity);
+                        this.logger.info(`Updated sync state: lastSyncedUid=${maxSyncedUid}, uidValidity=${currentUidValidity}`);
+                    } catch (syncStateError) {
+                        this.logger.error(syncStateError, 'Failed to update sync state');
+                    }
+                } else if (syncState === null && currentUidValidity > 0) {
+                    // First run but no emails were synced - still save the uidValidity so we don't do a full resync next time
+                    try {
+                        await this.db.updateSyncState(conn.id, 0, currentUidValidity);
+                        this.logger.info(`Initialized sync state with uidValidity=${currentUidValidity}`);
+                    } catch (syncStateError) {
+                        this.logger.error(syncStateError, 'Failed to initialize sync state');
+                    }
+                }
+
+                if (syncedCount === 0) {
+                    this.logger.info(`No new messages to sync for connection ${conn.id}`);
+                } else {
+                    this.logger.info(`Synced ${syncedCount} new messages for connection ${conn.id}`);
                 }
             } finally {
                 lock.release();

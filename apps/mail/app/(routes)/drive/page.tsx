@@ -47,7 +47,11 @@ import {
   Loader2,
   ArrowLeft,
   CloudDownload,
+  X,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -124,11 +128,20 @@ export default function DrivePage() {
   const [isImporting, setIsImporting] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
 
+  // Upload state
+  const [uploadQueue, setUploadQueue] = useState<Array<{
+    id: string;
+    file: File;
+    progress: number;
+    status: 'pending' | 'uploading' | 'completed' | 'failed';
+    error?: string;
+  }>>([]);
+
   // Current folder from URL
   const currentFolderId = searchParams.get('folder') || null;
 
   // Queries
-  const { data: contents, isLoading } = useQuery(
+  const { data: contents, isLoading, error } = useQuery(
     trpc.drive.listContents.queryOptions({
       folderId: currentFolderId,
       filter,
@@ -137,9 +150,16 @@ export default function DrivePage() {
     }),
   );
 
+  // Log error for debugging
+  if (error) {
+    console.error('Drive listContents error:', error);
+  }
+
   const { data: folderData } = useQuery(
-    trpc.drive.getFolder.queryOptions({ folderId: currentFolderId! }),
-    { enabled: !!currentFolderId },
+    trpc.drive.getFolder.queryOptions(
+      { folderId: currentFolderId! },
+      { enabled: !!currentFolderId },
+    ),
   );
 
   const { data: stats } = useQuery(trpc.drive.getStorageStats.queryOptions());
@@ -306,30 +326,81 @@ export default function DrivePage() {
   };
 
   const handleFileUpload = useCallback(async (files: FileList) => {
-    const formData = new FormData();
+    const fileArray = Array.from(files);
 
-    for (const file of Array.from(files)) {
-      formData.append('file', file);
+    // Add files to upload queue
+    const newUploads = fileArray.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      progress: 0,
+      status: 'pending' as const,
+    }));
+
+    setUploadQueue((prev) => [...prev, ...newUploads]);
+
+    // Process uploads sequentially
+    for (const upload of newUploads) {
+      // Update status to uploading
+      setUploadQueue((prev) =>
+        prev.map((u) => (u.id === upload.id ? { ...u, status: 'uploading' as const } : u))
+      );
+
+      const formData = new FormData();
+      formData.append('file', upload.file);
       if (currentFolderId) {
         formData.append('folderId', currentFolderId);
       }
 
       try {
-        const response = await fetch('/api/drive/upload', {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-          },
+        // Use XMLHttpRequest for progress tracking
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              setUploadQueue((prev) =>
+                prev.map((u) => (u.id === upload.id ? { ...u, progress } : u))
+              );
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              setUploadQueue((prev) =>
+                prev.map((u) =>
+                  u.id === upload.id ? { ...u, status: 'completed' as const, progress: 100 } : u
+                )
+              );
+              toast.success(`Uploaded ${upload.file.name}`);
+              resolve();
+            } else {
+              reject(new Error(`Upload failed: ${xhr.status}`));
+            }
+          });
+
+          xhr.addEventListener('error', () => reject(new Error('Network error')));
+          xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+          xhr.open('POST', '/api/drive/upload');
+          xhr.withCredentials = true; // Send cookies for auth
+          xhr.send(formData);
         });
-
-        if (!response.ok) throw new Error('Upload failed');
-
-        toast.success(`Uploaded ${file.name}`);
-      } catch {
-        toast.error(`Failed to upload ${file.name}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+        setUploadQueue((prev) =>
+          prev.map((u) =>
+            u.id === upload.id ? { ...u, status: 'failed' as const, error: errorMessage } : u
+          )
+        );
+        toast.error(`Failed to upload ${upload.file.name}`);
       }
     }
+
+    // Clear completed uploads after 3 seconds
+    setTimeout(() => {
+      setUploadQueue((prev) => prev.filter((u) => u.status !== 'completed'));
+    }, 3000);
 
     invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -536,13 +607,19 @@ export default function DrivePage() {
   const breadcrumbs = folderData?.breadcrumbs || [];
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-full w-full flex-col bg-background">
       {/* Header */}
       <div className="border-b p-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <HardDrive className="h-6 w-6" />
-            <h1 className="text-2xl font-bold">Nubo Drive</h1>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/mail/inbox')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Inbox
+            </Button>
+            <div className="flex items-center gap-2">
+              <HardDrive className="h-6 w-6" />
+              <h1 className="text-2xl font-bold">Nubo Drive</h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <DropdownMenu>
@@ -1214,6 +1291,73 @@ export default function DrivePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Upload Progress Panel */}
+      {uploadQueue.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 w-96 rounded-lg border bg-background shadow-lg">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <h3 className="text-sm font-semibold">
+              Uploading {uploadQueue.filter((u) => u.status === 'uploading' || u.status === 'pending').length} file(s)
+            </h3>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setUploadQueue([])}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="max-h-64 overflow-auto">
+            {uploadQueue.map((upload) => (
+              <div key={upload.id} className="flex items-center gap-3 border-b px-4 py-2 last:border-b-0">
+                <div className="flex-shrink-0">
+                  {upload.status === 'completed' ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  ) : upload.status === 'failed' ? (
+                    <AlertCircle className="h-5 w-5 text-red-500" />
+                  ) : upload.status === 'uploading' ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                  ) : (
+                    <File className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{upload.file.name}</p>
+                  {upload.status === 'uploading' && (
+                    <Progress value={upload.progress} className="h-1 mt-1" />
+                  )}
+                  {upload.status === 'failed' && (
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-red-500">{upload.error}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 px-1 text-xs"
+                        onClick={() => {
+                          // Remove the failed upload and re-add it
+                          setUploadQueue((prev) => prev.filter((u) => u.id !== upload.id));
+                          const dt = new DataTransfer();
+                          dt.items.add(upload.file);
+                          handleFileUpload(dt.files);
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+                  {upload.status === 'completed' && (
+                    <p className="text-xs text-green-500">Completed</p>
+                  )}
+                </div>
+                <div className="flex-shrink-0 text-xs text-muted-foreground">
+                  {upload.status === 'uploading' && `${upload.progress}%`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

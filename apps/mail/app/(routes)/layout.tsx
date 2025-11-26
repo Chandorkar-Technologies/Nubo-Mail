@@ -8,7 +8,7 @@ export default function Layout() {
   return (
     <CommandPaletteProvider>
       <HotkeyProviderWrapper>
-        <div className="relative flex max-h-screen w-full overflow-hidden">
+        <div className="relative flex h-screen max-h-screen w-full overflow-hidden">
           <Outlet />
         </div>
       </HotkeyProviderWrapper>

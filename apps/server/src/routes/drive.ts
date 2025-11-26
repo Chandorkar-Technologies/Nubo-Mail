@@ -1,38 +1,15 @@
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { createDb } from '../db';
-import { driveFile, driveFolder, session, user } from '../db/schema';
+import { driveFile, driveFolder } from '../db/schema';
 import { env } from '../env';
+import type { HonoContext } from '../ctx';
 
-export const driveApiRouter = new Hono();
-
-// Helper to get user from session token
-async function getUserFromToken(token: string | undefined) {
-  if (!token) return null;
-
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-  try {
-    const sessionRecord = await db.query.session.findFirst({
-      where: and(eq(session.token, token), eq(session.expiresAt, new Date())),
-    });
-
-    if (!sessionRecord) return null;
-
-    const userRecord = await db.query.user.findFirst({
-      where: eq(user.id, sessionRecord.userId),
-    });
-
-    return userRecord;
-  } finally {
-    await conn.end();
-  }
-}
+export const driveApiRouter = new Hono<HonoContext>();
 
 // Upload file endpoint
 driveApiRouter.post('/upload', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  const token = authHeader?.replace('Bearer ', '');
-  const userRecord = await getUserFromToken(token);
+  const userRecord = c.var.sessionUser;
 
   if (!userRecord) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -108,9 +85,7 @@ driveApiRouter.post('/upload', async (c) => {
 // Download file endpoint
 driveApiRouter.get('/download/:fileId', async (c) => {
   const fileId = c.req.param('fileId');
-  const authHeader = c.req.header('Authorization');
-  const token = authHeader?.replace('Bearer ', '');
-  const userRecord = await getUserFromToken(token);
+  const userRecord = c.var.sessionUser;
 
   if (!userRecord) {
     return c.json({ error: 'Unauthorized' }, 401);
