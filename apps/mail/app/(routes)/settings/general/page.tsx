@@ -16,10 +16,10 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useForm, type ControllerRenderProps } from 'react-hook-form';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { Globe, Clock, Mail, InfoIcon } from 'lucide-react';
+import { Globe, Clock, Mail, InfoIcon, AtSign } from 'lucide-react';
 import { getLocale, setLocale } from '@/paraglide/runtime';
 import { useState, useEffect, useMemo, memo } from 'react';
 import { userSettingsSchema } from '@zero/server/schemas';
@@ -319,6 +319,72 @@ export default function GeneralPage() {
     [],
   );
 
+  // Username state and handlers
+  const [newUsername, setNewUsername] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [_checkingUsername, setCheckingUsername] = useState(false);
+  const [_savingUsername, setSavingUsername] = useState(false);
+
+  // Fetch current username - using trpc directly since the endpoints are in drive router
+  const { data: usernameData, refetch: refetchUsername } = useQuery({
+    queryKey: ['username'],
+    queryFn: async () => {
+      try {
+        return await trpc.drive.getMyUsername.query();
+      } catch {
+        return { username: null };
+      }
+    },
+  });
+
+  // Set initial username value when data loads
+  useEffect(() => {
+    if (usernameData?.username) {
+      setNewUsername(usernameData.username);
+    }
+  }, [usernameData?.username]);
+
+  // Check username availability with debounce
+  useEffect(() => {
+    if (!newUsername || newUsername === usernameData?.username) {
+      setUsernameAvailable(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      if (newUsername.length < 3) {
+        setUsernameAvailable(false);
+        return;
+      }
+      setCheckingUsername(true);
+      try {
+        const result = await trpc.drive.checkUsername.query({ username: newUsername });
+        setUsernameAvailable(result.available);
+      } catch {
+        setUsernameAvailable(false);
+      } finally {
+        setCheckingUsername(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [newUsername, usernameData?.username, trpc.drive.checkUsername]);
+
+  const _handleSaveUsername = async () => {
+    if (!newUsername || newUsername.length < 3 || !usernameAvailable) return;
+    setSavingUsername(true);
+    try {
+      await trpc.drive.setUsername.mutate({ username: newUsername });
+      await refetchUsername();
+      toast.success('Username updated successfully');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update username';
+      toast.error(errorMessage);
+    } finally {
+      setSavingUsername(false);
+    }
+  };
+
   return (
     <div className="grid gap-6">
       <SettingsCard
@@ -370,6 +436,30 @@ export default function GeneralPage() {
             <FormField control={form.control} name="animations" render={renderAnimationsField} />
           </form>
         </Form>
+      </SettingsCard>
+
+      {/* Username Settings Card - Display only, username is set once */}
+      <SettingsCard
+        title="Nubo Username"
+        description="Your unique Nubo username for sharing and collaboration."
+      >
+        <div className="space-y-4">
+          {usernameData?.username ? (
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AtSign className="h-5 w-5 text-primary" />
+                <span className="text-lg font-medium">{usernameData.username}@nubo.email</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This is your permanent Nubo address. Others can use this to share files and documents with you.
+              </p>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              Loading username...
+            </div>
+          )}
+        </div>
       </SettingsCard>
     </div>
   );

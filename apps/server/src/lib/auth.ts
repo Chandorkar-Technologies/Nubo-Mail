@@ -1,12 +1,14 @@
-import {
-  AIWritingAssistantEmail,
-  AutoLabelingEmail,
-  CategoriesEmail,
-  Mail0ProEmail,
-  ShortcutsEmail,
-  SuperSearchEmail,
-  WelcomeEmail,
-} from './react-emails/email-sequences';
+// Disabled: React email components use @react-email/render which uses 'cache' in fetch
+// CF Workers doesn't support 'cache' field. Re-enable when emails are pre-rendered.
+// import {
+//   AIWritingAssistantEmail,
+//   AutoLabelingEmail,
+//   CategoriesEmail,
+//   Mail0ProEmail,
+//   ShortcutsEmail,
+//   SuperSearchEmail,
+//   WelcomeEmail,
+// } from './react-emails/email-sequences';
 import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
@@ -14,7 +16,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
-import { dubAnalytics } from '@dub/better-auth';
+// import { dubAnalytics } from '@dub/better-auth'; // Disabled - uses 'cache' in fetch which CF Workers doesn't support
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
 import { APIError } from 'better-auth/api';
@@ -23,69 +25,84 @@ import { createDriver } from './driver';
 import { createDb } from '../db';
 import { Effect } from 'effect';
 import { env } from '../env';
-import { Dub } from 'dub';
+// import { Dub } from 'dub'; // Disabled - uses 'cache' in fetch which CF Workers doesn't support
 
-const scheduleCampaign = (userInfo: { address: string; name: string }) =>
-  Effect.gen(function* () {
-    const name = userInfo.name || 'there';
-    const resendService = resend();
+// Disabled: React email components use @react-email/render which uses 'cache' in fetch
+// CF Workers doesn't support 'cache' field. Re-enable when emails are pre-rendered.
+// const scheduleCampaign = (userInfo: { address: string; name: string }) =>
+//   Effect.gen(function* () {
+//     const name = userInfo.name || 'there';
+//     const resendService = resend();
+//
+//     const sendEmail = (subject: string, react: unknown, scheduledAt?: string) =>
+//       Effect.promise(() =>
+//         resendService.emails
+//           .send({
+//             from: 'Nubo <onboarding@nubo.email>',
+//             to: userInfo.address,
+//             subject,
+//             react: react as any,
+//             ...(scheduledAt && { scheduledAt }),
+//           })
+//           .then(() => void 0),
+//       );
+//
+//     const emails = [
+//       {
+//         subject: 'Welcome to Nubo',
+//         react: WelcomeEmail({ name }),
+//         scheduledAt: undefined,
+//       },
+//       {
+//         subject: 'Mail0 Pro is here 🚀💼',
+//         react: Mail0ProEmail({ name }),
+//         scheduledAt: 'in 1 day',
+//       },
+//       {
+//         subject: 'Auto-labeling is here 🎉📥',
+//         react: AutoLabelingEmail({ name }),
+//         scheduledAt: 'in 2 days',
+//       },
+//       {
+//         subject: 'AI Writing Assistant is here 🤖💬',
+//         react: AIWritingAssistantEmail({ name }),
+//         scheduledAt: 'in 3 days',
+//       },
+//       {
+//         subject: 'Shortcuts are here 🔧🚀',
+//         react: ShortcutsEmail({ name }),
+//         scheduledAt: 'in 4 days',
+//       },
+//       {
+//         subject: 'Categories are here 📂🔍',
+//         react: CategoriesEmail({ name }),
+//         scheduledAt: 'in 5 days',
+//       },
+//       {
+//         subject: 'Super Search is here 🔍🚀',
+//         react: SuperSearchEmail({ name }),
+//         scheduledAt: 'in 6 days',
+//       },
+//     ];
+//
+//     yield* Effect.all(
+//       emails.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
+//       { concurrency: 'unbounded' },
+//     );
+//   });
 
-    const sendEmail = (subject: string, react: unknown, scheduledAt?: string) =>
-      Effect.promise(() =>
-        resendService.emails
-          .send({
-            from: 'Nubo <onboarding@nubo.email>',
-            to: userInfo.address,
-            subject,
-            react: react as any,
-            ...(scheduledAt && { scheduledAt }),
-          })
-          .then(() => void 0),
-      );
-
-    const emails = [
-      {
-        subject: 'Welcome to Nubo',
-        react: WelcomeEmail({ name }),
-        scheduledAt: undefined,
-      },
-      {
-        subject: 'Mail0 Pro is here 🚀💼',
-        react: Mail0ProEmail({ name }),
-        scheduledAt: 'in 1 day',
-      },
-      {
-        subject: 'Auto-labeling is here 🎉📥',
-        react: AutoLabelingEmail({ name }),
-        scheduledAt: 'in 2 days',
-      },
-      {
-        subject: 'AI Writing Assistant is here 🤖💬',
-        react: AIWritingAssistantEmail({ name }),
-        scheduledAt: 'in 3 days',
-      },
-      {
-        subject: 'Shortcuts are here 🔧🚀',
-        react: ShortcutsEmail({ name }),
-        scheduledAt: 'in 4 days',
-      },
-      {
-        subject: 'Categories are here 📂🔍',
-        react: CategoriesEmail({ name }),
-        scheduledAt: 'in 5 days',
-      },
-      {
-        subject: 'Super Search is here 🔍🚀',
-        react: SuperSearchEmail({ name }),
-        scheduledAt: 'in 6 days',
-      },
-    ];
-
-    yield* Effect.all(
-      emails.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
-      { concurrency: 'unbounded' },
-    );
-  });
+// Generate a unique username from email
+const generateUsername = (email: string): string => {
+  // Extract the local part of the email (before @)
+  const localPart = email.split('@')[0];
+  // Clean it up: lowercase, only alphanumeric and underscores
+  const cleaned = localPart.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_{2,}/g, '_');
+  // Ensure it's at least 3 characters
+  const base = cleaned.length >= 3 ? cleaned : `${cleaned}user`;
+  // Add random suffix to avoid collisions
+  const suffix = Math.random().toString(36).substring(2, 6);
+  return `${base}_${suffix}`.substring(0, 30);
+};
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
@@ -142,13 +159,19 @@ const connectionHandlerHook = async (account: Account) => {
     updatingInfo,
   );
 
-  if (env.NODE_ENV === 'production') {
-    await Effect.runPromise(
-      scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
-    );
-  }
+  // Disabled: React email components use @react-email/render which uses 'cache' in fetch
+  // CF Workers doesn't support 'cache' field. Re-enable when emails are pre-rendered.
+  // if (env.NODE_ENV === 'production') {
+  //   // Run in background - don't block auth flow if email fails
+  //   Effect.runPromise(
+  //     scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
+  //   ).catch((error) => {
+  //     console.error('Failed to send onboarding emails:', error);
+  //   });
+  // }
 
-  if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
+  // Queue Gmail subscription if service account is configured and queue is available
+  if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}' && env.subscribe_queue) {
     await env.subscribe_queue.send({
       connectionId: result.id,
       providerId: account.providerId,
@@ -158,13 +181,14 @@ const connectionHandlerHook = async (account: Account) => {
 
 export const createAuth = () => {
   const twilioClient = twilio();
-  const dub = new Dub();
+  // const dub = new Dub(); // Disabled - uses 'cache' in fetch which CF Workers doesn't support
 
   return betterAuth({
     plugins: [
-      dubAnalytics({
-        dubClient: dub,
-      }),
+      // dubAnalytics disabled - uses 'cache' in fetch which CF Workers doesn't support
+      // dubAnalytics({
+      //   dubClient: dub,
+      // }),
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),
@@ -262,36 +286,46 @@ export const createAuth = () => {
       },
     },
     emailAndPassword: {
-      enabled: false,
+      enabled: true,
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
         await resend().emails.send({
-          from: 'Nubo <onboarding@nubo.email>',
+          from: 'Nubo <no-reply@nubo.email>',
           to: user.email,
-          subject: 'Reset your password',
+          subject: 'Reset your Nubo password',
           html: `
-            <h2>Reset Your Password</h2>
-            <p>Click the link below to reset your password:</p>
-            <a href="${url}">${url}</a>
-            <p>If you didn't request this, you can safely ignore this email.</p>
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #333;">Reset Your Password</h2>
+              <p>You requested to reset your password. Click the button below to set a new password:</p>
+              <a href="${url}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Reset Password</a>
+              <p style="color: #666; font-size: 14px;">Or copy this link: <a href="${url}">${url}</a></p>
+              <p style="color: #666; font-size: 14px;">If you didn't request this, you can safely ignore this email.</p>
+              <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+              <p style="color: #999; font-size: 12px;">This link will expire in 1 hour.</p>
+            </div>
           `,
         });
       },
     },
     emailVerification: {
-      sendOnSignUp: false,
+      sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, token }) => {
         const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
 
         await resend().emails.send({
-          from: 'Nubo <onboarding@nubo.email>',
+          from: 'Nubo <no-reply@nubo.email>',
           to: user.email,
           subject: 'Verify your Nubo account',
           html: `
-            <h2>Verify Your Nubo Account</h2>
-            <p>Click the link below to verify your email:</p>
-            <a href="${verificationUrl}">${verificationUrl}</a>
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #333;">Welcome to Nubo!</h2>
+              <p>Please verify your email address to complete your registration:</p>
+              <a href="${verificationUrl}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Verify Email</a>
+              <p style="color: #666; font-size: 14px;">Or copy this link: <a href="${verificationUrl}">${verificationUrl}</a></p>
+              <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+              <p style="color: #999; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
+            </div>
           `,
         });
       },
@@ -320,6 +354,21 @@ export const createAuth = () => {
                 ...defaultUserSettings,
                 timezone,
               });
+            }
+
+            // Generate username if user doesn't have one
+            const userRecord = await db.findUser();
+            if (userRecord && !userRecord.username) {
+              const username = generateUsername(newSession.user.email);
+              try {
+                await db.updateUser({ username });
+              } catch {
+                // Username collision - try with different suffix
+                const retryUsername = generateUsername(newSession.user.email);
+                await db.updateUser({ username: retryUsername }).catch(() => {
+                  console.error('Failed to generate username for user:', newSession.user.id);
+                });
+              }
             }
           }
         }
@@ -384,7 +433,7 @@ const createAuthConfig = () => {
         console.error('API Error', error);
       },
       errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
-      throw: true,
+      throw: false, // Don't throw 500, redirect to errorURL instead
     },
   } satisfies BetterAuthOptions;
 };

@@ -91,6 +91,7 @@ export type ZeroEnv = {
   AXIOM_API_TOKEN: string;
   AXIOM_DATASET: string;
   THREADS_BUCKET: R2Bucket;
+  DRIVE_BUCKET: R2Bucket;
   thread_queue: Queue;
   VECTORIZE: VectorizeIndex;
   VECTORIZE_MESSAGE: VectorizeIndex;

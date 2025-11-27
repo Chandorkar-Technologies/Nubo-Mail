@@ -247,7 +247,7 @@ function NavItem(item: NavItemProps & { href: string }) {
         tooltip={state === 'collapsed' ? item.title : undefined}
         className="flex cursor-not-allowed items-center opacity-50"
       >
-        {item.icon && <item.icon ref={iconRef} className="relative mr-2.5 h-3 w-3.5" />}
+        {item.icon && <item.icon ref={iconRef} className="relative mr-2.5 h-3 w-3.5 text-[#898989]" />}
         <p className="relative bottom-px mt-0.5 truncate text-[13px]">{item.title}</p>
       </SidebarMenuButton>
     );
@@ -274,7 +274,7 @@ function NavItem(item: NavItemProps & { href: string }) {
           onClick={handleClick}
         >
           <Link target={item.target} to={item.href}>
-            {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0" />}
+            {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0 text-[#898989]" />}
             <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
               {item.title}
             </p>

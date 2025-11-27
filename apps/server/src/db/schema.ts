@@ -26,6 +26,8 @@ export const user = createTable('user', {
   customPrompt: text('custom_prompt'),
   phoneNumber: text('phone_number').unique(),
   phoneNumberVerified: boolean('phone_number_verified'),
+  // Nubo username - unique identifier for sharing (e.g., koolninad@nubo.email)
+  username: text('username').unique(),
 });
 
 export const session = createTable(
@@ -662,5 +664,100 @@ export const driveImportJobRelations = relations(driveImportJob, ({ one }) => ({
   targetFolder: one(driveFolder, {
     fields: [driveImportJob.targetFolderId],
     references: [driveFolder.id],
+  }),
+}));
+
+// Drive Sharing - Share files and folders with other users or via links
+export const driveShare = createTable(
+  'drive_share',
+  {
+    id: text('id').primaryKey(),
+    // Owner of the file/folder
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Either file or folder (one must be set)
+    fileId: text('file_id').references(() => driveFile.id, { onDelete: 'cascade' }),
+    folderId: text('folder_id').references(() => driveFolder.id, { onDelete: 'cascade' }),
+    // Who it's shared with (null for public/link shares)
+    sharedWithUserId: text('shared_with_user_id').references(() => user.id, { onDelete: 'cascade' }),
+    sharedWithUsername: text('shared_with_username'), // Nubo username
+    sharedWithEmail: text('shared_with_email'), // External email for invites
+    // Access level
+    accessLevel: text('access_level').notNull().default('view'), // 'view', 'edit', 'admin'
+    // Share type
+    shareType: text('share_type').notNull(), // 'user', 'link', 'email_invite'
+    // For public/link shares
+    shareToken: text('share_token').unique(),
+    // Optional password for link shares
+    password: text('password'),
+    // Expiration
+    expiresAt: timestamp('expires_at'),
+    // Metadata
+    message: text('message'), // Optional message when sharing
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('drive_share_user_id_idx').on(t.userId),
+    index('drive_share_file_id_idx').on(t.fileId),
+    index('drive_share_folder_id_idx').on(t.folderId),
+    index('drive_share_shared_with_user_idx').on(t.sharedWithUserId),
+    index('drive_share_token_idx').on(t.shareToken),
+    index('drive_share_type_idx').on(t.shareType),
+  ],
+);
+
+// Track share access history
+export const driveShareAccess = createTable(
+  'drive_share_access',
+  {
+    id: text('id').primaryKey(),
+    shareId: text('share_id')
+      .notNull()
+      .references(() => driveShare.id, { onDelete: 'cascade' }),
+    accessedByUserId: text('accessed_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    accessedByEmail: text('accessed_by_email'),
+    accessedAt: timestamp('accessed_at').notNull().defaultNow(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+  },
+  (t) => [
+    index('drive_share_access_share_id_idx').on(t.shareId),
+    index('drive_share_access_user_id_idx').on(t.accessedByUserId),
+  ],
+);
+
+// Relations for sharing tables
+export const driveShareRelations = relations(driveShare, ({ one, many }) => ({
+  owner: one(user, {
+    fields: [driveShare.userId],
+    references: [user.id],
+    relationName: 'shareOwner',
+  }),
+  sharedWithUser: one(user, {
+    fields: [driveShare.sharedWithUserId],
+    references: [user.id],
+    relationName: 'shareRecipient',
+  }),
+  file: one(driveFile, {
+    fields: [driveShare.fileId],
+    references: [driveFile.id],
+  }),
+  folder: one(driveFolder, {
+    fields: [driveShare.folderId],
+    references: [driveFolder.id],
+  }),
+  accessHistory: many(driveShareAccess),
+}));
+
+export const driveShareAccessRelations = relations(driveShareAccess, ({ one }) => ({
+  share: one(driveShare, {
+    fields: [driveShareAccess.shareId],
+    references: [driveShare.id],
+  }),
+  accessedByUser: one(user, {
+    fields: [driveShareAccess.accessedByUserId],
+    references: [user.id],
   }),
 }));

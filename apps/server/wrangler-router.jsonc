@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "nubo-router",
-  "compatibility_date": "2024-09-23",
+  "compatibility_date": "2024-11-11",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/workers/api-router.ts",
   "observability": {

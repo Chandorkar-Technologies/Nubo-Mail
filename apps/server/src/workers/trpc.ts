@@ -7,6 +7,7 @@
  * - /sse/* routes (Server-sent events for MCP)
  * - All Durable Object bindings
  */
+
 import {
   createUpdatedMatrixFromNewEmail,
   initializeStyleMatrixFromEmail,
@@ -58,7 +59,13 @@ import { Effect } from 'effect';
 import { Hono } from 'hono';
 import { imapRouter } from '../routes/imap';
 import { driveApiRouter } from '../routes/drive';
+import { verifyToken } from '../lib/server-utils';
+import { initTracing } from '../lib/tracing';
+import { env } from '../env';
 
+// Sentry tunnel configuration
+const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
+const SENTRY_PROJECT_IDS = new Set(['4509328795303936']);
 
 export class DbRpcDO extends RpcTarget {
   constructor(
@@ -1002,6 +1009,36 @@ const api = new Hono<HonoContext>()
   .route('/drive', driveApiRouter)
   .route('/razorpay', razorpayApi)
   .route('/public', publicRouter)
+  // Sentry tunnel for error reporting
+  .post('/monitoring/sentry', async (c) => {
+    try {
+      const envelopeBytes = await c.req.arrayBuffer();
+      const envelope = new TextDecoder().decode(envelopeBytes);
+      const piece = envelope.split('\n')[0];
+      const header = JSON.parse(piece);
+      const dsn = new URL(header['dsn']);
+      const project_id = dsn.pathname?.replace('/', '');
+
+      if (dsn.hostname !== SENTRY_HOST) {
+        throw new Error(`Invalid sentry hostname: ${dsn.hostname}`);
+      }
+
+      if (!project_id || !SENTRY_PROJECT_IDS.has(project_id)) {
+        throw new Error(`Invalid sentry project id: ${project_id}`);
+      }
+
+      const upstream_sentry_url = `https://${SENTRY_HOST}/api/${project_id}/envelope/`;
+      await fetch(upstream_sentry_url, {
+        method: 'POST',
+        body: envelopeBytes,
+      });
+
+      return c.json({}, { status: 200 });
+    } catch (e) {
+      console.error('error tunneling to sentry', e);
+      return c.json({ error: 'error tunneling to sentry' }, { status: 500 });
+    }
+  })
   // Auth routes - delegate to better-auth
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
@@ -1069,6 +1106,83 @@ const app = new Hono<HonoContext>()
     }),
   )
   .get('/health', (c) => c.json({ message: 'Nubo TRPC Worker is Up!' }))
+  // Google Pub/Sub notification endpoint for Gmail sync
+  .post('/a8n/notify/:providerId', async (c) => {
+    const tracer = initTracing();
+    const span = tracer.startSpan('a8n_notify', {
+      attributes: {
+        'provider.id': c.req.param('providerId'),
+        'notification.type': 'email_notification',
+        'http.method': c.req.method,
+        'http.url': c.req.url,
+      },
+    });
+
+    try {
+      if (!c.req.header('Authorization')) {
+        span.setAttributes({ 'auth.status': 'missing' });
+        return c.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
+      const providerId = c.req.param('providerId');
+      if (providerId === EProviders.google) {
+        const body = await c.req.json<{ historyId: string }>();
+        const subHeader = c.req.header('x-goog-pubsub-subscription-name');
+
+        span.setAttributes({
+          'history.id': body.historyId,
+          'subscription.name': subHeader || 'missing',
+        });
+
+        if (!subHeader) {
+          console.log('[GOOGLE] no subscription header', body);
+          span.setAttributes({ 'error.type': 'missing_subscription_header' });
+          return c.json({}, { status: 200 });
+        }
+
+        let isValid = false;
+        try {
+          isValid = await verifyToken(c.req.header('Authorization')!.split(' ')[1]);
+        } catch (error) {
+          console.log('[GOOGLE] token verification failed', error);
+        }
+        if (!isValid) {
+          console.log('[GOOGLE] invalid request', body);
+          span.setAttributes({ 'auth.status': 'invalid' });
+          return c.json({}, { status: 200 });
+        }
+
+        span.setAttributes({ 'auth.status': 'valid' });
+
+        try {
+          await env.thread_queue.send({
+            providerId,
+            historyId: body.historyId,
+            subscriptionName: subHeader,
+          });
+          span.setAttributes({ 'queue.message_sent': true });
+          console.log('[A8N] Message sent to thread_queue', { providerId, historyId: body.historyId, subscriptionName: subHeader });
+        } catch (error) {
+          console.error('Error sending to thread queue', error, {
+            providerId,
+            historyId: body.historyId,
+            subscriptionName: subHeader,
+          });
+          span.recordException(error as Error);
+          span.setStatus({ code: 2, message: (error as Error).message });
+        }
+        return c.json({ message: 'OK' }, { status: 200 });
+      }
+
+      return c.json({ message: 'OK' }, { status: 200 });
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({ code: 2, message: (error as Error).message });
+      throw error;
+    } finally {
+      span.end();
+    }
+  })
   // OAuth discovery metadata
   .get('/.well-known/oauth-authorization-server', async (c) => {
     const auth = createAuth();

@@ -6,6 +6,7 @@
  * - /.well-known/oauth-authorization-server
  * - Session management
  */
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';

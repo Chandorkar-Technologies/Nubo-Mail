@@ -95,6 +95,11 @@ export const mailRouter = router({
       const executionCtx = getContext<HonoContext>().executionCtx;
 
       console.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
+      console.debug('[listThreads] activeConnection:', {
+        id: activeConnection.id,
+        providerId: activeConnection.providerId,
+        email: activeConnection.email,
+      });
 
       if (activeConnection.providerId === 'imap') {
         const driver = connectionToDriver(activeConnection, env.THREADS_BUCKET);
@@ -135,13 +140,29 @@ export const mailRouter = router({
           pageToken: cursor,
           folder,
         });
+        console.log('[listThreads] Raw list response:', {
+          threadCount: threadsResponse.threads?.length || 0,
+          hasNextPage: !!threadsResponse.nextPageToken,
+        });
       } else {
+        console.log('[listThreads] Calling getThreadsFromDB:', {
+          connectionId: activeConnection.id,
+          folder,
+          maxResults,
+          labelIds: effectiveLabelIds,
+          pageToken: cursor,
+        });
         threadsResponse = await getThreadsFromDB(activeConnection.id, {
           folder,
           // query: q,
           maxResults,
           labelIds: effectiveLabelIds,
           pageToken: cursor,
+        });
+        console.log('[listThreads] DB response:', {
+          threadCount: threadsResponse.threads?.length || 0,
+          hasNextPage: !!threadsResponse.nextPageToken,
+          firstThreadId: threadsResponse.threads?.[0]?.id,
         });
       }
 

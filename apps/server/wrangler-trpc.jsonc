@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "nubo-trpc",
-  "compatibility_date": "2024-09-23",
+  "compatibility_date": "2024-11-11",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/workers/trpc.ts",
   "routes": [
@@ -101,6 +101,18 @@
       "name": "sync-threads-coordinator-workflow-prod"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "queue": "subscribe-queue-prod",
+        "binding": "subscribe_queue"
+      },
+      {
+        "queue": "thread-queue-prod",
+        "binding": "thread_queue"
+      }
+    ]
+  },
   "migrations": [
     {
       "tag": "v1",
@@ -142,9 +154,7 @@
     "THREAD_SYNC_LOOP": "true",
     "DISABLE_WORKFLOWS": "true",
     "USE_OPENAI": "false",
-    "LIVEKIT_API_KEY": "",
-    "LIVEKIT_API_SECRET": "",
-    "LIVEKIT_WS_URL": "wss://meet.nubo.email",
+    "LIVEKIT_WS_URL": "wss://nubo-a2h70w03.livekit.cloud",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
     "OTEL_SERVICE_NAME": "zero-email-server-production",
     "DD_API_KEY": "",

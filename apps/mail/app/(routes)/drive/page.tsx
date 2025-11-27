@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -50,6 +50,10 @@ import {
   X,
   AlertCircle,
   CheckCircle2,
+  Eye,
+  Share2,
+  Link2,
+  Users,
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
@@ -127,6 +131,13 @@ export default function DrivePage() {
   const [importFolderStack, setImportFolderStack] = useState<Array<{ id: string; name: string }>>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  const [activeImportJob, setActiveImportJob] = useState<{
+    jobId: string;
+    totalFiles: number;
+    processedFiles: number;
+    failedFiles: number;
+    status: 'processing' | 'completed' | 'failed';
+  } | null>(null);
 
   // Upload state
   const [uploadQueue, setUploadQueue] = useState<Array<{
@@ -137,8 +148,52 @@ export default function DrivePage() {
     error?: string;
   }>>([]);
 
+  // Preview state
+  const [previewFile, setPreviewFile] = useState<{
+    id: string;
+    name: string;
+    mimeType: string;
+    data?: string;
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Share state
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{
+    id: string;
+    name: string;
+    type: 'file' | 'folder';
+  } | null>(null);
+  const [shareUsername, setShareUsername] = useState('');
+  const [shareAccessLevel, setShareAccessLevel] = useState<'view' | 'edit'>('view');
+  const [shareSearchResults, setShareSearchResults] = useState<Array<{
+    id: string;
+    name: string;
+    username: string | null;
+    email: string;
+  }>>([]);
+  const [shareSearching, setShareSearching] = useState(false);
+  const [generatedShareUrl, setGeneratedShareUrl] = useState<string | null>(null);
+
   // Current folder from URL
   const currentFolderId = searchParams.get('folder') || null;
+
+  // Handle OAuth callback when this page loads in a popup
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+
+    // Check if we're in a popup and have an OAuth code
+    if (code && window.opener) {
+      // Send the code to the opener window
+      window.opener.postMessage(
+        { type: 'oauth_callback', code, state },
+        window.location.origin
+      );
+      // Close this popup
+      window.close();
+    }
+  }, [searchParams]);
 
   // Queries
   const { data: contents, isLoading, error } = useQuery(
@@ -178,6 +233,8 @@ export default function DrivePage() {
   const getDownloadUrlMutation = useMutation(trpc.drive.getDownloadUrl.mutationOptions());
   const getEditorConfigMutation = useMutation(trpc.drive.getEditorConfig.mutationOptions());
   const emptyTrashMutation = useMutation(trpc.drive.emptyTrash.mutationOptions());
+  const getPreviewUrlMutation = useMutation(trpc.drive.getPreviewUrl.mutationOptions());
+  const createShareMutation = useMutation(trpc.drive.createShare.mutationOptions());
 
   // Import mutations
   const getGoogleAuthUrlMutation = useMutation(trpc.drive.getGoogleDriveAuthUrl.mutationOptions());
@@ -317,6 +374,80 @@ export default function DrivePage() {
     }
   };
 
+  const handlePreview = async (fileId: string, fileName: string, mimeType: string) => {
+    setPreviewLoading(true);
+    setPreviewFile({ id: fileId, name: fileName, mimeType });
+    try {
+      const result = await getPreviewUrlMutation.mutateAsync({ fileId });
+      setPreviewFile({ id: fileId, name: fileName, mimeType, data: result.data });
+    } catch {
+      toast.error('Failed to load preview');
+      setPreviewFile(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    setPreviewFile(null);
+  };
+
+  const handleOpenShare = (id: string, name: string, type: 'file' | 'folder') => {
+    setShareTarget({ id, name, type });
+    setShareUsername('');
+    setShareAccessLevel('view');
+    setShareSearchResults([]);
+    setGeneratedShareUrl(null);
+    setIsShareOpen(true);
+  };
+
+  const handleSearchUsers = async (query: string) => {
+    setShareUsername(query);
+    if (query.length < 2) {
+      setShareSearchResults([]);
+      return;
+    }
+    setShareSearching(true);
+    try {
+      const results = await trpc.drive.searchUsers.query({ query });
+      setShareSearchResults(results);
+    } catch {
+      setShareSearchResults([]);
+    } finally {
+      setShareSearching(false);
+    }
+  };
+
+  const handleCreateShare = async (targetUserId?: string) => {
+    if (!shareTarget) return;
+    try {
+      const result = await createShareMutation.mutateAsync({
+        fileId: shareTarget.type === 'file' ? shareTarget.id : undefined,
+        folderId: shareTarget.type === 'folder' ? shareTarget.id : undefined,
+        shareType: targetUserId ? 'user' : 'link',
+        sharedWithUserId: targetUserId,
+        accessLevel: shareAccessLevel,
+      });
+      if (targetUserId) {
+        toast.success('Shared successfully');
+        setIsShareOpen(false);
+        setShareTarget(null);
+      } else if (result.shareUrl) {
+        setGeneratedShareUrl(result.shareUrl);
+        toast.success('Share link created');
+      }
+    } catch {
+      toast.error('Failed to create share');
+    }
+  };
+
+  const handleCopyShareUrl = async () => {
+    if (generatedShareUrl) {
+      await navigator.clipboard.writeText(generatedShareUrl);
+      toast.success('Link copied to clipboard');
+    }
+  };
+
   const handleNavigateToFolder = (folderId: string | null) => {
     if (folderId) {
       setSearchParams({ folder: folderId });
@@ -382,7 +513,9 @@ export default function DrivePage() {
           xhr.addEventListener('error', () => reject(new Error('Network error')));
           xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
-          xhr.open('POST', '/api/drive/upload');
+          // Use the backend URL for API requests
+          const backendUrl = import.meta.env.VITE_PUBLIC_BACKEND_URL || '';
+          xhr.open('POST', `${backendUrl}/api/drive/upload`);
           xhr.withCredentials = true; // Send cookies for auth
           xhr.send(formData);
         });
@@ -414,56 +547,35 @@ export default function DrivePage() {
     const redirectUri = `${window.location.origin}/drive`;
 
     try {
-      if (source === 'google_drive') {
-        const { url } = await getGoogleAuthUrlMutation.mutateAsync({ redirectUri });
-        // Open OAuth popup
-        const popup = window.open(url, 'Import from Google Drive', 'width=600,height=700');
-        if (popup) {
-          // Listen for OAuth callback
-          const checkPopup = setInterval(() => {
-            try {
-              if (popup.closed) {
-                clearInterval(checkPopup);
-                return;
-              }
-              if (popup.location.href.includes(window.location.origin)) {
-                const popupUrl = new URL(popup.location.href);
-                const code = popupUrl.searchParams.get('code');
-                popup.close();
-                clearInterval(checkPopup);
-                if (code) {
-                  handleOAuthCallback(source, code, redirectUri);
-                }
-              }
-            } catch {
-              // Cross-origin - popup still on OAuth page
-            }
-          }, 500);
-        }
-      } else {
-        const { url } = await getOneDriveAuthUrlMutation.mutateAsync({ redirectUri });
-        const popup = window.open(url, 'Import from OneDrive', 'width=600,height=700');
-        if (popup) {
-          const checkPopup = setInterval(() => {
-            try {
-              if (popup.closed) {
-                clearInterval(checkPopup);
-                return;
-              }
-              if (popup.location.href.includes(window.location.origin)) {
-                const popupUrl = new URL(popup.location.href);
-                const code = popupUrl.searchParams.get('code');
-                popup.close();
-                clearInterval(checkPopup);
-                if (code) {
-                  handleOAuthCallback(source, code, redirectUri);
-                }
-              }
-            } catch {
-              // Cross-origin - popup still on OAuth page
-            }
-          }, 500);
-        }
+      const authUrl = source === 'google_drive'
+        ? (await getGoogleAuthUrlMutation.mutateAsync({ redirectUri })).url
+        : (await getOneDriveAuthUrlMutation.mutateAsync({ redirectUri })).url;
+
+      // Open OAuth popup
+      const popupName = source === 'google_drive' ? 'Import from Google Drive' : 'Import from OneDrive';
+      const popup = window.open(authUrl, popupName, 'width=600,height=700');
+
+      if (popup) {
+        // Listen for message from popup with OAuth code
+        const handleMessage = (event: MessageEvent) => {
+          // Verify origin for security
+          if (event.origin !== window.location.origin) return;
+
+          if (event.data?.type === 'oauth_callback' && event.data?.code) {
+            window.removeEventListener('message', handleMessage);
+            handleOAuthCallback(source, event.data.code, redirectUri);
+          }
+        };
+
+        window.addEventListener('message', handleMessage);
+
+        // Also check if popup is closed without completing OAuth
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            window.removeEventListener('message', handleMessage);
+          }
+        }, 1000);
       }
     } catch {
       toast.error('Failed to start import');
@@ -551,24 +663,38 @@ export default function DrivePage() {
     if (!importAccessToken || !importSource || selectedImportFiles.size === 0) return;
 
     setIsImporting(true);
+    const totalFiles = selectedImportFiles.size;
+
     try {
+      let jobId: string;
       if (importSource === 'google_drive') {
-        const { jobId } = await importFromGoogleMutation.mutateAsync({
+        const result = await importFromGoogleMutation.mutateAsync({
           accessToken: importAccessToken,
           fileIds: Array.from(selectedImportFiles),
           targetFolderId: currentFolderId,
         });
-        toast.success(`Import started! Job ID: ${jobId.slice(0, 8)}...`);
+        jobId = result.jobId;
       } else {
-        const { jobId } = await importFromOneDriveMutation.mutateAsync({
+        const result = await importFromOneDriveMutation.mutateAsync({
           accessToken: importAccessToken,
           fileIds: Array.from(selectedImportFiles),
           targetFolderId: currentFolderId,
         });
-        toast.success(`Import started! Job ID: ${jobId.slice(0, 8)}...`);
+        jobId = result.jobId;
       }
 
-      // Reset import state
+      // Set active import job for progress tracking
+      setActiveImportJob({
+        jobId,
+        totalFiles,
+        processedFiles: 0,
+        failedFiles: 0,
+        status: 'processing',
+      });
+
+      toast.success(`Importing ${totalFiles} file${totalFiles > 1 ? 's' : ''}...`);
+
+      // Reset import dialog state
       setIsImportOpen(false);
       setImportSource(null);
       setImportAccessToken(null);
@@ -576,10 +702,40 @@ export default function DrivePage() {
       setSelectedImportFiles(new Set());
       setImportFolderStack([]);
 
-      // Refresh file list after a short delay
-      setTimeout(() => invalidate(), 2000);
+      // Poll for job status
+      const pollInterval = setInterval(async () => {
+        try {
+          const job = await trpc.drive.getImportJob.query({ jobId });
+          setActiveImportJob({
+            jobId,
+            totalFiles: job.totalFiles,
+            processedFiles: job.processedFiles,
+            failedFiles: job.failedFiles,
+            status: job.status as 'processing' | 'completed' | 'failed',
+          });
+
+          if (job.status === 'completed' || job.status === 'failed') {
+            clearInterval(pollInterval);
+            invalidate();
+
+            if (job.status === 'completed') {
+              toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles > 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
+            } else {
+              toast.error(`Import failed. ${job.processedFiles} succeeded, ${job.failedFiles} failed.`);
+            }
+
+            // Clear active job after a delay
+            setTimeout(() => setActiveImportJob(null), 3000);
+          }
+        } catch (error) {
+          console.error('Failed to poll job status:', error);
+          clearInterval(pollInterval);
+        }
+      }, 1000);
+
     } catch {
       toast.error('Failed to start import');
+      setActiveImportJob(null);
     } finally {
       setIsImporting(false);
     }
@@ -743,6 +899,56 @@ export default function DrivePage() {
         </div>
       </div>
 
+      {/* Import Progress Bar */}
+      {activeImportJob && (
+        <div className="border-b bg-muted/30 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {activeImportJob.status === 'processing' ? (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              ) : activeImportJob.status === 'completed' ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-destructive" />
+              )}
+              <span className="text-sm font-medium">
+                {activeImportJob.status === 'processing'
+                  ? 'Importing files...'
+                  : activeImportJob.status === 'completed'
+                    ? 'Import complete!'
+                    : 'Import failed'}
+              </span>
+            </div>
+            <div className="flex-1">
+              <Progress
+                value={(activeImportJob.processedFiles + activeImportJob.failedFiles) / activeImportJob.totalFiles * 100}
+                className="h-2"
+              />
+            </div>
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>
+                {activeImportJob.processedFiles + activeImportJob.failedFiles} / {activeImportJob.totalFiles}
+              </span>
+              {activeImportJob.failedFiles > 0 && (
+                <span className="text-destructive">
+                  ({activeImportJob.failedFiles} failed)
+                </span>
+              )}
+              {activeImportJob.status === 'processing' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => setActiveImportJob(null)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
         {isLoading ? (
@@ -817,7 +1023,16 @@ export default function DrivePage() {
               <div
                 key={file.id}
                 className="group relative flex flex-col items-center rounded-lg border p-4 hover:bg-accent cursor-pointer"
-                onDoubleClick={() => file.isEditable ? handleOpenEditor(file.id) : handleDownload(file.id, file.name)}
+                onDoubleClick={() => {
+                  // PDF and images open in preview, editable files open in editor, others download
+                  if (file.isPdf || file.isImage) {
+                    handlePreview(file.id, file.name, file.mimeType);
+                  } else if (file.isEditable) {
+                    handleOpenEditor(file.id);
+                  } else {
+                    handleDownload(file.id, file.name);
+                  }
+                }}
               >
                 {file.isStarred && (
                   <Star className="absolute left-1 top-1 h-4 w-4 fill-yellow-500 text-yellow-500" />
@@ -855,6 +1070,14 @@ export default function DrivePage() {
                       </>
                     ) : (
                       <>
+                        {/* Preview option for PDFs and images */}
+                        {(file.isPdf || file.isImage) && (
+                          <DropdownMenuItem onClick={() => handlePreview(file.id, file.name, file.mimeType)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            Preview
+                          </DropdownMenuItem>
+                        )}
+                        {/* Editor option for editable files (not PDFs) */}
                         {file.isEditable && (
                           <DropdownMenuItem onClick={() => handleOpenEditor(file.id)}>
                             <ExternalLink className="mr-2 h-4 w-4" />
@@ -864,6 +1087,11 @@ export default function DrivePage() {
                         <DropdownMenuItem onClick={() => handleDownload(file.id, file.name)}>
                           <Download className="mr-2 h-4 w-4" />
                           Download
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleOpenShare(file.id, file.name, 'file')}>
+                          <Share2 className="mr-2 h-4 w-4" />
+                          Share
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleStar(file.id)}>
                           <Star className={cn('mr-2 h-4 w-4', file.isStarred && 'fill-yellow-500')} />
@@ -953,7 +1181,16 @@ export default function DrivePage() {
                   <tr
                     key={file.id}
                     className="border-t hover:bg-accent cursor-pointer"
-                    onDoubleClick={() => file.isEditable ? handleOpenEditor(file.id) : handleDownload(file.id, file.name)}
+                    onDoubleClick={() => {
+                      // PDF and images open in preview, editable files open in editor, others download
+                      if (file.isPdf || file.isImage) {
+                        handlePreview(file.id, file.name, file.mimeType);
+                      } else if (file.isEditable) {
+                        handleOpenEditor(file.id);
+                      } else {
+                        handleDownload(file.id, file.name);
+                      }
+                    }}
                   >
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
@@ -992,21 +1229,38 @@ export default function DrivePage() {
                             </>
                           ) : (
                             <>
+                              {/* Preview option for PDFs and images */}
+                              {(file.isPdf || file.isImage) && (
+                                <DropdownMenuItem onClick={() => handlePreview(file.id, file.name, file.mimeType)}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  Preview
+                                </DropdownMenuItem>
+                              )}
+                              {/* Editor option for editable files (not PDFs) */}
                               {file.isEditable && (
                                 <DropdownMenuItem onClick={() => handleOpenEditor(file.id)}>
+                                  <ExternalLink className="mr-2 h-4 w-4" />
                                   Open in Editor
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuItem onClick={() => handleDownload(file.id, file.name)}>
+                                <Download className="mr-2 h-4 w-4" />
                                 Download
                               </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleOpenShare(file.id, file.name, 'file')}>
+                                <Share2 className="mr-2 h-4 w-4" />
+                                Share
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleToggleStar(file.id)}>
+                                <Star className={cn('mr-2 h-4 w-4', file.isStarred && 'fill-yellow-500')} />
                                 {file.isStarred ? 'Unstar' : 'Star'}
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => {
                                 setRenameTarget({ id: file.id, name: file.name, type: 'file' });
                                 setIsRenameOpen(true);
                               }}>
+                                <Pencil className="mr-2 h-4 w-4" />
                                 Rename
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
@@ -1014,6 +1268,7 @@ export default function DrivePage() {
                                 className="text-destructive"
                                 onClick={() => handleDelete(file.id, 'file')}
                               >
+                                <Trash2 className="mr-2 h-4 w-4" />
                                 Move to Trash
                               </DropdownMenuItem>
                             </>
@@ -1173,9 +1428,11 @@ export default function DrivePage() {
                   ) : (
                     <div className="divide-y">
                       {/* Select all header */}
-                      <div className="flex items-center gap-3 px-4 py-2 bg-muted/50">
-                        <button
-                          onClick={handleSelectAllImport}
+                      <div
+                        className="flex items-center gap-3 px-4 py-2 bg-muted/50 cursor-pointer hover:bg-muted"
+                        onClick={handleSelectAllImport}
+                      >
+                        <div
                           className={cn(
                             'h-4 w-4 rounded border flex items-center justify-center',
                             selectedImportFiles.size > 0 && selectedImportFiles.size === importFiles.filter(f => !f.isFolder).length
@@ -1186,7 +1443,7 @@ export default function DrivePage() {
                           {selectedImportFiles.size > 0 && selectedImportFiles.size === importFiles.filter(f => !f.isFolder).length && (
                             <Check className="h-3 w-3" />
                           )}
-                        </button>
+                        </div>
                         <span className="text-sm font-medium">
                           {selectedImportFiles.size > 0
                             ? `${selectedImportFiles.size} selected`
@@ -1289,6 +1546,179 @@ export default function DrivePage() {
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview Dialog */}
+      <Dialog open={!!previewFile} onOpenChange={() => handleClosePreview()}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              {previewFile?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-auto bg-muted/30 rounded-lg">
+            {previewLoading ? (
+              <div className="flex items-center justify-center py-24">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-muted-foreground">Loading preview...</span>
+              </div>
+            ) : previewFile?.data ? (
+              previewFile.mimeType.startsWith('image/') ? (
+                <div className="flex items-center justify-center p-4">
+                  <img
+                    src={`data:${previewFile.mimeType};base64,${previewFile.data}`}
+                    alt={previewFile.name}
+                    className="max-w-full max-h-[70vh] object-contain"
+                  />
+                </div>
+              ) : previewFile.mimeType === 'application/pdf' ? (
+                <iframe
+                  src={`data:application/pdf;base64,${previewFile.data}`}
+                  className="w-full h-[70vh]"
+                  title={previewFile.name}
+                />
+              ) : (
+                <div className="flex items-center justify-center py-24 text-muted-foreground">
+                  Preview not available for this file type
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center py-24 text-muted-foreground">
+                Failed to load preview
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleClosePreview}>
+              Close
+            </Button>
+            {previewFile && (
+              <Button onClick={() => handleDownload(previewFile.id, previewFile.name)}>
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Dialog */}
+      <Dialog open={isShareOpen} onOpenChange={setIsShareOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" />
+              Share "{shareTarget?.name}"
+            </DialogTitle>
+            <DialogDescription>
+              Share this {shareTarget?.type} with other Nubo users or create a link.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Search users */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Share with user</label>
+              <div className="relative">
+                <Users className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search by username or email..."
+                  value={shareUsername}
+                  onChange={(e) => handleSearchUsers(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              {/* Search results */}
+              {shareSearchResults.length > 0 && (
+                <div className="border rounded-lg divide-y max-h-40 overflow-auto">
+                  {shareSearchResults.map((user) => (
+                    <button
+                      key={user.id}
+                      className="w-full px-3 py-2 text-left hover:bg-accent flex items-center justify-between"
+                      onClick={() => handleCreateShare(user.id)}
+                    >
+                      <div>
+                        <div className="font-medium">{user.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {user.username ? `@${user.username}` : user.email}
+                        </div>
+                      </div>
+                      <Share2 className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {shareSearching && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Searching...
+                </div>
+              )}
+            </div>
+
+            {/* Access level */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Access level</label>
+              <div className="flex gap-2">
+                <Button
+                  variant={shareAccessLevel === 'view' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setShareAccessLevel('view')}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  View only
+                </Button>
+                <Button
+                  variant={shareAccessLevel === 'edit' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setShareAccessLevel('edit')}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Can edit
+                </Button>
+              </div>
+            </div>
+
+            {/* Create link or show generated link */}
+            <div className="pt-4 border-t">
+              {generatedShareUrl ? (
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-green-600">Link created!</label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={generatedShareUrl}
+                      readOnly
+                      className="flex-1 text-sm"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleCopyShareUrl}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => setGeneratedShareUrl(null)}
+                  >
+                    Create another link
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleCreateShare()}
+                >
+                  <Link2 className="mr-2 h-4 w-4" />
+                  Create shareable link
+                </Button>
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

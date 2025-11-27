@@ -4,9 +4,10 @@ import type { EnvVarInfo } from '@zero/server/auth-providers';
 import { Google, Microsoft } from '@/components/icons/icons';
 import ErrorMessage from '@/app/(auth)/login/error-message';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { TriangleAlert } from 'lucide-react';
 import { signIn } from '@/lib/auth-client';
-import { useNavigate } from 'react-router';
+import { useNavigate, Link } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
 
@@ -71,6 +72,33 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
   const navigate = useNavigate();
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [error, _] = useQueryState('error');
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setLoginError(null);
+
+    try {
+      const result = await signIn.email({
+        email,
+        password,
+        callbackURL: '/mail',
+      });
+
+      if (result.error) {
+        setLoginError(result.error.message || 'Invalid email or password');
+      }
+    } catch {
+      setLoginError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     const missing = providers.find((p) => p.required && !p.enabled);
@@ -299,6 +327,75 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
                     </Button>
                   ),
               )}
+
+              <div className="relative my-4 w-full">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-gray-600" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-[#111111] px-2 text-gray-400">Or continue with email</span>
+                </div>
+              </div>
+
+              {showEmailLogin ? (
+                <form onSubmit={handleEmailLogin} className="w-full space-y-3">
+                  {loginError && (
+                    <Alert variant="destructive" className="border-red-500/40 bg-red-500/10">
+                      <AlertDescription className="text-red-400">{loginError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <Input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="border-gray-700 bg-black text-white placeholder:text-gray-500"
+                    disabled={isLoading}
+                    required
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="border-gray-700 bg-black text-white placeholder:text-gray-500"
+                    disabled={isLoading}
+                    required
+                  />
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? 'Signing in...' : 'Sign in'}
+                  </Button>
+                  <div className="flex justify-between text-sm">
+                    <button
+                      type="button"
+                      onClick={() => setShowEmailLogin(false)}
+                      className="text-gray-400 hover:text-white"
+                    >
+                      Back
+                    </button>
+                    <Link to="/forgot-password" className="text-gray-400 hover:text-white">
+                      Forgot password?
+                    </Link>
+                  </div>
+                </form>
+              ) : (
+                <Button
+                  onClick={() => setShowEmailLogin(true)}
+                  variant="outline"
+                  className="border-input bg-background text-primary hover:bg-accent hover:text-accent-foreground h-12 w-full rounded-lg border-2"
+                >
+                  Sign in with Email
+                </Button>
+              )}
+
+              <div className="mt-4 text-center text-sm">
+                <p className="text-gray-400">
+                  Don't have an account?{' '}
+                  <Link to="/signup" className="text-white underline hover:text-white/80">
+                    Sign up
+                  </Link>
+                </p>
+              </div>
             </div>
           )}
         </div>

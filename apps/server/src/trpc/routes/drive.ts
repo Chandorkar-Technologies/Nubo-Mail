@@ -1,6 +1,6 @@
 import { privateProcedure, router } from '../trpc';
-import { driveFile, driveFolder, driveImportJob } from '../../db/schema';
-import { eq, and, isNull, desc, asc } from 'drizzle-orm';
+import { driveFile, driveFolder, driveImportJob, driveShare, user } from '../../db/schema';
+import { eq, and, isNull, desc, asc, or, sql, like } from 'drizzle-orm';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type * as schema from '../../db/schema';
 import { z } from 'zod';
@@ -13,7 +13,7 @@ function getFileExtension(filename: string): string {
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
 }
 
-// Helper to check if file is editable in OnlyOffice
+// Helper to check if file is editable in OnlyOffice (excludes PDF - PDF is view-only)
 function isEditableInOnlyOffice(_mimeType: string, filename: string): boolean {
   const ext = getFileExtension(filename);
   const editableExtensions = [
@@ -23,10 +23,36 @@ function isEditableInOnlyOffice(_mimeType: string, filename: string): boolean {
     'xls', 'xlsx', 'ods', 'csv',
     // Presentations
     'ppt', 'pptx', 'odp',
-    // PDF (view/edit)
-    'pdf',
   ];
   return editableExtensions.includes(ext);
+}
+
+// Helper to check if file can be previewed (includes PDF)
+function isPreviewable(_mimeType: string, filename: string): boolean {
+  const ext = getFileExtension(filename);
+  const previewableExtensions = [
+    // Documents
+    'doc', 'docx', 'odt', 'rtf', 'txt',
+    // Spreadsheets
+    'xls', 'xlsx', 'ods', 'csv',
+    // Presentations
+    'ppt', 'pptx', 'odp',
+    // PDF
+    'pdf',
+    // Images
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
+  ];
+  return previewableExtensions.includes(ext);
+}
+
+// Check if file is a PDF
+function isPdf(filename: string): boolean {
+  return getFileExtension(filename) === 'pdf';
+}
+
+// Check if file is an image
+function isImage(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
 }
 
 // Helper to get mime type category
@@ -111,6 +137,9 @@ export const driveRouter = router({
       const enrichedFiles = files.map((file) => ({
         ...file,
         isEditable: isEditableInOnlyOffice(file.mimeType, file.name),
+        isPreviewable: isPreviewable(file.mimeType, file.name),
+        isPdf: isPdf(file.name),
+        isImage: isImage(file.mimeType),
         category: getMimeCategory(file.mimeType),
         extension: getFileExtension(file.name),
       }));
@@ -251,7 +280,7 @@ export const driveRouter = router({
       });
 
       // Delete files from R2
-      const bucket = env.THREADS_BUCKET;
+      const bucket = env.DRIVE_BUCKET;
       for (const file of filesToDelete) {
         try {
           await bucket.delete(file.r2Key);
@@ -313,7 +342,7 @@ export const driveRouter = router({
 
       // Get file from R2 and generate a temporary URL
       // For now, return the R2 key - in production you'd generate a signed URL
-      const bucket = env.THREADS_BUCKET;
+      const bucket = env.DRIVE_BUCKET;
       const object = await bucket.get(file.r2Key);
 
       if (!object) {
@@ -483,7 +512,7 @@ export const driveRouter = router({
       }
 
       // Delete from R2
-      const bucket = env.THREADS_BUCKET;
+      const bucket = env.DRIVE_BUCKET;
       try {
         await bucket.delete(file.r2Key);
         if (file.thumbnailR2Key) {
@@ -512,7 +541,7 @@ export const driveRouter = router({
     });
 
     // Delete from R2
-    const bucket = env.THREADS_BUCKET;
+    const bucket = env.DRIVE_BUCKET;
     for (const file of trashedFiles) {
       try {
         await bucket.delete(file.r2Key);
@@ -578,6 +607,8 @@ export const driveRouter = router({
     .input(z.object({ fileId: z.string() }))
     .mutation(async ({ input, ctx }) => {
       const { sessionUser } = ctx;
+      // Use ctx.c.env to get the proper environment variables from the Hono context
+      const workerEnv = ctx.c.env;
 
       const file = await ctx.db.query.driveFile.findFirst({
         where: and(
@@ -594,8 +625,9 @@ export const driveRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not supported for editing' });
       }
 
-      const onlyOfficeUrl = env.ONLYOFFICE_URL || 'https://office.nubo.email';
-      const jwtSecret = env.ONLYOFFICE_JWT_SECRET;
+      const onlyOfficeUrl = workerEnv.ONLYOFFICE_URL || 'https://office.nubo.email';
+      const jwtSecret = workerEnv.ONLYOFFICE_JWT_SECRET;
+      const backendUrl = workerEnv.VITE_PUBLIC_BACKEND_URL;
 
       if (!jwtSecret) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'OnlyOffice JWT secret not configured' });
@@ -619,11 +651,11 @@ export const driveRouter = router({
           fileType: ext,
           key: documentKey,
           title: file.name,
-          url: `${env.VITE_PUBLIC_BACKEND_URL}/api/drive/file/${file.id}/content`,
+          url: `${backendUrl}/api/drive/file/${file.id}/content`,
         },
         documentType,
         editorConfig: {
-          callbackUrl: `${env.VITE_PUBLIC_BACKEND_URL}/api/drive/onlyoffice/callback`,
+          callbackUrl: `${backendUrl}/api/drive/onlyoffice/callback`,
           user: {
             id: sessionUser.id,
             name: sessionUser.name || sessionUser.email,
@@ -792,7 +824,9 @@ export const driveRouter = router({
       });
 
       if (!response.ok) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Failed to list files' });
+        const errorText = await response.text();
+        console.error('Google Drive API error:', response.status, errorText);
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Failed to list files: ${errorText}` });
       }
 
       const data = await response.json() as {
@@ -832,6 +866,7 @@ export const driveRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const { sessionUser } = ctx;
+      const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
 
       // Create import job
       const jobId = crypto.randomUUID();
@@ -849,15 +884,21 @@ export const driveRouter = router({
         createdAt: new Date(),
       });
 
-      // Process files in background (simplified - in production would use a queue)
-      processGoogleDriveImport(
+      // Process files using waitUntil to keep worker alive
+      const importPromise = processGoogleDriveImport(
         input.accessToken,
         input.fileIds,
         sessionUser.id,
         jobId,
         input.targetFolderId || null,
         ctx.db,
-      ).catch(console.error);
+        bucket,
+      ).catch((error) => {
+        console.error('[GoogleDriveImport] Import failed:', error);
+      });
+
+      // Keep worker alive until import completes
+      ctx.c.executionCtx.waitUntil(importPromise);
 
       return { jobId };
     }),
@@ -989,6 +1030,7 @@ export const driveRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const { sessionUser } = ctx;
+      const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
 
       // Create import job
       const jobId = crypto.randomUUID();
@@ -1006,17 +1048,372 @@ export const driveRouter = router({
         createdAt: new Date(),
       });
 
-      // Process files in background
-      processOneDriveImport(
+      // Process files using waitUntil to keep worker alive
+      const importPromise = processOneDriveImport(
         input.accessToken,
         input.fileIds,
         sessionUser.id,
         jobId,
         input.targetFolderId || null,
         ctx.db,
-      ).catch(console.error);
+        bucket,
+      ).catch((error) => {
+        console.error('[OneDriveImport] Import failed:', error);
+      });
+
+      // Keep worker alive until import completes
+      ctx.c.executionCtx.waitUntil(importPromise);
 
       return { jobId };
+    }),
+
+  // ================== SHARING ENDPOINTS ==================
+
+  // Get preview URL for PDF/images (no editing)
+  getPreviewUrl: privateProcedure
+    .input(z.object({ fileId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+      const workerEnv = ctx.c.env;
+      const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
+
+      const file = await ctx.db.query.driveFile.findFirst({
+        where: and(
+          eq(driveFile.id, input.fileId),
+          eq(driveFile.userId, sessionUser.id),
+        ),
+      });
+
+      if (!file) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'File not found' });
+      }
+
+      // Helper function to convert ArrayBuffer to base64 without stack overflow
+      const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const chunkSize = 8192; // Process in chunks to avoid call stack issues
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+          binary += String.fromCharCode.apply(null, Array.from(chunk));
+        }
+        return btoa(binary);
+      };
+
+      // For images, return base64
+      if (isImage(file.mimeType)) {
+        const object = await bucket.get(file.r2Key);
+        if (!object) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'File content not found' });
+        }
+        const arrayBuffer = await object.arrayBuffer();
+        const base64 = arrayBufferToBase64(arrayBuffer);
+        return {
+          type: 'image' as const,
+          mimeType: file.mimeType,
+          data: base64,
+          fileName: file.name,
+        };
+      }
+
+      // For PDFs, return a signed URL or base64
+      if (isPdf(file.name)) {
+        const object = await bucket.get(file.r2Key);
+        if (!object) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'File content not found' });
+        }
+        const arrayBuffer = await object.arrayBuffer();
+        const base64 = arrayBufferToBase64(arrayBuffer);
+        return {
+          type: 'pdf' as const,
+          mimeType: 'application/pdf',
+          data: base64,
+          fileName: file.name,
+        };
+      }
+
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not previewable' });
+    }),
+
+  // Create a share for a file or folder
+  createShare: privateProcedure
+    .input(z.object({
+      fileId: z.string().optional(),
+      folderId: z.string().optional(),
+      shareType: z.enum(['user', 'link', 'email_invite']),
+      accessLevel: z.enum(['view', 'edit', 'admin']).default('view'),
+      sharedWithUserId: z.string().optional(), // Direct user ID
+      sharedWithUsername: z.string().optional(),
+      sharedWithEmail: z.string().optional(),
+      expiresAt: z.string().optional(), // ISO date string
+      password: z.string().optional(),
+      message: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      // Validate that either fileId or folderId is provided
+      if (!input.fileId && !input.folderId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Either fileId or folderId is required' });
+      }
+
+      // Verify ownership
+      if (input.fileId) {
+        const file = await ctx.db.query.driveFile.findFirst({
+          where: and(
+            eq(driveFile.id, input.fileId),
+            eq(driveFile.userId, sessionUser.id),
+          ),
+        });
+        if (!file) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'File not found' });
+        }
+      }
+
+      if (input.folderId) {
+        const folder = await ctx.db.query.driveFolder.findFirst({
+          where: and(
+            eq(driveFolder.id, input.folderId),
+            eq(driveFolder.userId, sessionUser.id),
+          ),
+        });
+        if (!folder) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Folder not found' });
+        }
+      }
+
+      // Find user by ID or username if sharing with user
+      let sharedWithUserId: string | null = input.sharedWithUserId || null;
+      let sharedWithUsername: string | null = input.sharedWithUsername || null;
+
+      if (input.shareType === 'user') {
+        if (input.sharedWithUserId) {
+          // Verify user exists and get username
+          const targetUser = await ctx.db.query.user.findFirst({
+            where: eq(user.id, input.sharedWithUserId),
+          });
+          if (!targetUser) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+          }
+          sharedWithUserId = targetUser.id;
+          sharedWithUsername = targetUser.username;
+        } else if (input.sharedWithUsername) {
+          const targetUser = await ctx.db.query.user.findFirst({
+            where: eq(user.username, input.sharedWithUsername),
+          });
+          if (!targetUser) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+          }
+          sharedWithUserId = targetUser.id;
+        }
+      }
+
+      // Generate share token for link shares
+      const shareToken = input.shareType === 'link'
+        ? crypto.randomUUID().replace(/-/g, '')
+        : null;
+
+      const shareId = crypto.randomUUID();
+      await ctx.db.insert(driveShare).values({
+        id: shareId,
+        userId: sessionUser.id,
+        fileId: input.fileId || null,
+        folderId: input.folderId || null,
+        sharedWithUserId,
+        sharedWithUsername,
+        sharedWithEmail: input.sharedWithEmail || null,
+        accessLevel: input.accessLevel,
+        shareType: input.shareType,
+        shareToken,
+        password: input.password || null,
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+        message: input.message || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // Generate share URL for link shares
+      const shareUrl = shareToken
+        ? `${env.VITE_PUBLIC_APP_URL}/drive/shared/${shareToken}`
+        : null;
+
+      return {
+        shareId,
+        shareToken,
+        shareUrl,
+      };
+    }),
+
+  // Get shares for a file or folder
+  getShares: privateProcedure
+    .input(z.object({
+      fileId: z.string().optional(),
+      folderId: z.string().optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      const conditions = [eq(driveShare.userId, sessionUser.id)];
+      if (input.fileId) {
+        conditions.push(eq(driveShare.fileId, input.fileId));
+      }
+      if (input.folderId) {
+        conditions.push(eq(driveShare.folderId, input.folderId));
+      }
+
+      const shares = await ctx.db
+        .select()
+        .from(driveShare)
+        .where(and(...conditions))
+        .orderBy(desc(driveShare.createdAt));
+
+      return shares.map(share => ({
+        ...share,
+        shareUrl: share.shareToken
+          ? `${env.VITE_PUBLIC_APP_URL}/drive/shared/${share.shareToken}`
+          : null,
+      }));
+    }),
+
+  // Delete a share
+  deleteShare: privateProcedure
+    .input(z.object({ shareId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      const share = await ctx.db.query.driveShare.findFirst({
+        where: and(
+          eq(driveShare.id, input.shareId),
+          eq(driveShare.userId, sessionUser.id),
+        ),
+      });
+
+      if (!share) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Share not found' });
+      }
+
+      await ctx.db.delete(driveShare).where(eq(driveShare.id, input.shareId));
+      return { success: true };
+    }),
+
+  // Get files shared with me
+  getSharedWithMe: privateProcedure
+    .query(async ({ ctx }) => {
+      const { sessionUser } = ctx;
+
+      const shares = await ctx.db
+        .select({
+          share: driveShare,
+          file: driveFile,
+          folder: driveFolder,
+          owner: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            username: user.username,
+          },
+        })
+        .from(driveShare)
+        .leftJoin(driveFile, eq(driveShare.fileId, driveFile.id))
+        .leftJoin(driveFolder, eq(driveShare.folderId, driveFolder.id))
+        .leftJoin(user, eq(driveShare.userId, user.id))
+        .where(eq(driveShare.sharedWithUserId, sessionUser.id))
+        .orderBy(desc(driveShare.createdAt));
+
+      return shares;
+    }),
+
+  // Search users by username (for sharing autocomplete)
+  searchUsers: privateProcedure
+    .input(z.object({ query: z.string().min(1) }))
+    .query(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      const users = await ctx.db
+        .select({
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          email: user.email,
+          image: user.image,
+        })
+        .from(user)
+        .where(
+          and(
+            or(
+              like(user.username, `%${input.query}%`),
+              like(user.name, `%${input.query}%`),
+              like(user.email, `%${input.query}%`),
+            ),
+            // Don't include current user
+            sql`${user.id} != ${sessionUser.id}`,
+          ),
+        )
+        .limit(10);
+
+      return users;
+    }),
+
+  // ================== USERNAME ENDPOINTS ==================
+
+  // Set or update username
+  setUsername: privateProcedure
+    .input(z.object({
+      username: z.string()
+        .min(3, 'Username must be at least 3 characters')
+        .max(30, 'Username must be at most 30 characters')
+        .regex(/^[a-z0-9_]+$/, 'Username can only contain lowercase letters, numbers, and underscores'),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      // Check if username is taken
+      const existing = await ctx.db.query.user.findFirst({
+        where: and(
+          eq(user.username, input.username),
+          sql`${user.id} != ${sessionUser.id}`,
+        ),
+      });
+
+      if (existing) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Username already taken' });
+      }
+
+      await ctx.db
+        .update(user)
+        .set({ username: input.username, updatedAt: new Date() })
+        .where(eq(user.id, sessionUser.id));
+
+      return { success: true, username: input.username };
+    }),
+
+  // Check if username is available
+  checkUsername: privateProcedure
+    .input(z.object({ username: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+
+      const existing = await ctx.db.query.user.findFirst({
+        where: and(
+          eq(user.username, input.username),
+          sql`${user.id} != ${sessionUser.id}`,
+        ),
+      });
+
+      return { available: !existing };
+    }),
+
+  // Get my username
+  getMyUsername: privateProcedure
+    .query(async ({ ctx }) => {
+      const { sessionUser } = ctx;
+
+      const userData = await ctx.db.query.user.findFirst({
+        where: eq(user.id, sessionUser.id),
+        columns: { username: true },
+      });
+
+      return { username: userData?.username || null };
     }),
 });
 
@@ -1028,13 +1425,16 @@ async function processGoogleDriveImport(
   jobId: string,
   targetFolderId: string | null,
   db: NeonHttpDatabase<typeof schema>,
+  bucket: R2Bucket,
 ) {
   let processed = 0;
   let failed = 0;
-  const bucket = env.THREADS_BUCKET;
+
+  console.log(`[GoogleDriveImport] Starting import job ${jobId} for ${fileIds.length} files, userId: ${userId}`);
 
   for (const sourceFileId of fileIds) {
     try {
+      console.log(`[GoogleDriveImport] Processing file ${sourceFileId}`);
       // Get file metadata
       const metaResponse = await fetch(
         `https://www.googleapis.com/drive/v3/files/${sourceFileId}?fields=name,mimeType,size`,
@@ -1094,6 +1494,7 @@ async function processGoogleDriveImport(
           httpMetadata: { contentType: exportMimeType },
         });
 
+        console.log(`[GoogleDriveImport] Inserting Google Doc file to DB: ${fileName}, r2Key: ${r2Key}`);
         await db.insert(driveFile).values({
           id: fileId,
           userId,
@@ -1107,6 +1508,7 @@ async function processGoogleDriveImport(
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+        console.log(`[GoogleDriveImport] Successfully inserted Google Doc: ${fileId}`);
       } else {
         // Download regular file
         const downloadResponse = await fetch(
@@ -1127,6 +1529,7 @@ async function processGoogleDriveImport(
           httpMetadata: { contentType: meta.mimeType },
         });
 
+        console.log(`[GoogleDriveImport] Inserting regular file to DB: ${meta.name}, r2Key: ${r2Key}, size: ${content.byteLength}`);
         await db.insert(driveFile).values({
           id: fileId,
           userId,
@@ -1140,9 +1543,11 @@ async function processGoogleDriveImport(
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+        console.log(`[GoogleDriveImport] Successfully inserted regular file: ${fileId}`);
       }
 
       processed++;
+      console.log(`[GoogleDriveImport] File ${sourceFileId} processed successfully. Total: ${processed}/${fileIds.length}`);
     } catch (e) {
       console.error(`Failed to import file ${sourceFileId}:`, e);
       failed++;
@@ -1175,10 +1580,10 @@ async function processOneDriveImport(
   jobId: string,
   targetFolderId: string | null,
   db: NeonHttpDatabase<typeof schema>,
+  bucket: R2Bucket,
 ) {
   let processed = 0;
   let failed = 0;
-  const bucket = env.THREADS_BUCKET;
 
   for (const sourceFileId of fileIds) {
     try {

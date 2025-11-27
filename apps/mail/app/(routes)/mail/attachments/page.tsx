@@ -83,10 +83,12 @@ export default function AttachmentsPage() {
     setPreviewContent(null);
 
     try {
+      const backendUrl = import.meta.env.VITE_PUBLIC_BACKEND_URL || '';
       const response = await fetch(
-        `/api/trpc/attachments.getAttachmentContent?input=${encodeURIComponent(
+        `${backendUrl}/api/trpc/attachments.getAttachmentContent?input=${encodeURIComponent(
           JSON.stringify({ connectionId, attachmentId: attachment.id })
-        )}`
+        )}`,
+        { credentials: 'include' }
       );
       const data = await response.json();
 
@@ -110,10 +112,12 @@ export default function AttachmentsPage() {
     }
 
     try {
+      const backendUrl = import.meta.env.VITE_PUBLIC_BACKEND_URL || '';
       const response = await fetch(
-        `/api/trpc/attachments.getAttachmentContent?input=${encodeURIComponent(
+        `${backendUrl}/api/trpc/attachments.getAttachmentContent?input=${encodeURIComponent(
           JSON.stringify({ connectionId, attachmentId: attachment.id })
-        )}`
+        )}`,
+        { credentials: 'include' }
       );
       const data = await response.json();
 

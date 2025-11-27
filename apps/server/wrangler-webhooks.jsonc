@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "nubo-webhooks",
-  "compatibility_date": "2024-09-23",
+  "compatibility_date": "2024-11-11",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/workers/webhooks.ts",
   "triggers": {
@@ -75,7 +75,7 @@
     "COOKIE_DOMAIN": ".nubo.email",
     "VITE_PUBLIC_BACKEND_URL": "https://api.nubo.email",
     "VITE_PUBLIC_APP_URL": "https://nubo.email",
-    "DISABLE_WORKFLOWS": "true",
+    "DISABLE_WORKFLOWS": "false",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
     "OTEL_SERVICE_NAME": "zero-email-server-production"
   },
@@ -91,6 +91,14 @@
     {
       "binding": "subscribed_accounts",
       "id": "296e90acb48b451780fcb6f6685ff3d2"
+    },
+    {
+      "binding": "connection_labels",
+      "id": "477037f0ee10480f9877c5b0bc867c24"
+    },
+    {
+      "binding": "prompts_storage",
+      "id": "e7ecf40058d24f22bec0e51b474605f0"
     },
     {
       "binding": "gmail_sub_age",

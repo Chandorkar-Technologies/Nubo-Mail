@@ -690,11 +690,16 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   }
 
   async forceReSync() {
+    console.log(`[ZeroDriver.forceReSync] Starting force resync for ${this.name}`);
     // this.foldersInSync.clear();
     this.syncThreadsInProgress.clear();
+    console.log(`[ZeroDriver.forceReSync] Dropping tables for ${this.name}`);
     this.dropTables();
+    console.log(`[ZeroDriver.forceReSync] Creating tables for ${this.name}`);
     this.createTables();
+    console.log(`[ZeroDriver.forceReSync] Starting syncFolders for ${this.name}`);
     await this.syncFolders();
+    console.log(`[ZeroDriver.forceReSync] Completed force resync for ${this.name}`);
   }
 
   public async setupAuth() {
@@ -922,7 +927,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   }
 
   private getThreadKey(threadId: string) {
-    return `${this.name}/${threadId}.json`;
+    return `thread-cache/${this.name}/${threadId}.json`;
   }
 
   async deleteThread(id: string) {
@@ -1329,9 +1334,31 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       maxResults,
     };
 
+    console.log('[ZeroDriver.getThreadsFromDB] Starting with params:', {
+      folder: params.folder,
+      normalizedFolder: normalizedParams.folder,
+      maxResults,
+      labelIds: params.labelIds,
+      connectionId: this.name,
+    });
+
+    // Debug: Get total thread count and label counts
+    const totalThreads = await countThreads(this.db);
+    const labelCounts = await countThreadsByLabels(this.db, ['INBOX', 'SENT', 'TRASH', 'SPAM']);
+    console.log('[ZeroDriver.getThreadsFromDB] Database stats:', {
+      totalThreads,
+      labelCounts,
+      connectionId: this.name,
+    });
+
     const program = pipe(
       this.queryThreads(normalizedParams),
       Effect.map((result) => {
+        console.log('[ZeroDriver.getThreadsFromDB] queryThreads returned:', {
+          resultCount: result?.length || 0,
+          firstResult: result?.[0],
+          connectionId: this.name,
+        });
         if (result?.length) {
           const threads = result.map((row) => ({
             id: String(row.id),
@@ -1356,7 +1383,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       }),
       Effect.catchAll((error) =>
         Effect.sync(() => {
-          console.error('Failed to get threads from database:', error);
+          console.error('[ZeroDriver.getThreadsFromDB] Failed:', error);
           throw error;
         }),
       ),
@@ -1661,6 +1688,12 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     labelIds: string[],
   ): Promise<void> {
     try {
+      console.log(`[ZeroDriver] Storing thread ${threadData.id} with labels:`, {
+        labelIds,
+        threadId: threadData.threadId,
+        subject: threadData.latestSubject?.substring(0, 50),
+        connectionId: this.name,
+      });
       await create(
         this.db,
         {
@@ -1674,7 +1707,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         labelIds,
       );
       //   await sendDoState(this.name);
-      console.log(`[ZeroDriver] Successfully stored thread ${threadData.id} in database`);
+      console.log(`[ZeroDriver] Successfully stored thread ${threadData.id} with ${labelIds.length} labels`);
     } catch (error) {
       console.error(`[ZeroDriver] Failed to store thread ${threadData.id} in database:`, error);
       throw error;

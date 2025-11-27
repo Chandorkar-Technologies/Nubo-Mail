@@ -54,9 +54,9 @@ export const livekitRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      // Manually get DB instance since publicProcedure doesn't have ctx.db
+      // Manually get DB instance - use HYPERDRIVE for Cloudflare Workers
       const { createDb } = await import('../../db');
-      const { db } = createDb(env.DATABASE_URL);
+      const { db } = createDb(env.HYPERDRIVE.connectionString);
 
       const meetings = await db
         .select()
@@ -197,9 +197,9 @@ export const livekitRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      // Manually get DB instance
+      // Manually get DB instance - use HYPERDRIVE for Cloudflare Workers
       const { createDb } = await import('../../db');
-      const { db } = createDb(env.DATABASE_URL);
+      const { db } = createDb(env.HYPERDRIVE.connectionString);
 
       const meetingRecord = await db.query.livekitMeeting.findFirst({
         where: eq(livekitMeeting.id, input.meetingId),
