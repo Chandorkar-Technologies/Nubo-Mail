@@ -27,7 +27,7 @@ import type { Message as ChatMessage } from 'ai';
 import { getPromptName } from '../pipelines';
 import { connection } from '../db/schema';
 import { getPrompt } from '../lib/brain';
-import { openai } from '@ai-sdk/openai';
+import { openai } from '../lib/openai';
 import { and, eq } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
 import { createDb } from '../db';

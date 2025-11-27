@@ -4,7 +4,7 @@ import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { perplexity } from '@ai-sdk/perplexity';
 import { colors } from '../../lib/prompts';
-import { openai } from '@ai-sdk/openai';
+import { openai } from '../../lib/openai';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
 import { env } from '../../env';

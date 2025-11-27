@@ -45,7 +45,7 @@ driveApiRouter.post('/upload', async (c) => {
       const r2Key = `drive/${userRecord.id}/${fileId}/${file.name}`;
 
       // Upload to R2
-      const bucket = env.THREADS_BUCKET;
+      const bucket = env.DRIVE_BUCKET;
       const arrayBuffer = await file.arrayBuffer();
       await bucket.put(r2Key, arrayBuffer, {
         httpMetadata: {
@@ -102,7 +102,7 @@ driveApiRouter.get('/download/:fileId', async (c) => {
       return c.json({ error: 'File not found' }, 404);
     }
 
-    const bucket = env.THREADS_BUCKET;
+    const bucket = env.DRIVE_BUCKET;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -137,7 +137,7 @@ driveApiRouter.get('/file/:fileId/content', async (c) => {
       return c.json({ error: 'File not found' }, 404);
     }
 
-    const bucket = env.THREADS_BUCKET;
+    const bucket = env.DRIVE_BUCKET;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -200,7 +200,7 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
         const content = await response.arrayBuffer();
 
         // Update file in R2
-        const bucket = env.THREADS_BUCKET;
+        const bucket = env.DRIVE_BUCKET;
         await bucket.put(file.r2Key, content, {
           httpMetadata: {
             contentType: file.mimeType,
