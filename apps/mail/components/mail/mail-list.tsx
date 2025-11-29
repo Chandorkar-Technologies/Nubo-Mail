@@ -39,7 +39,7 @@ import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
-import { Check, Star } from 'lucide-react';
+import { Check, Star, Paperclip } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
@@ -75,9 +75,8 @@ const Thread = memo(
 
     const optimisticState = useOptimisticThreadState(idToUse ?? '');
 
-    const { displayStarred, displayImportant, displayUnread, optimisticLabels, emailContent } =
+    const { displayStarred, displayImportant, displayUnread, optimisticLabels } =
       useMemo(() => {
-        const emailContent = getThreadData?.latest?.body;
         const displayStarred =
           optimisticState.optimisticStarred !== null
             ? optimisticState.optimisticStarred
@@ -124,7 +123,6 @@ const Thread = memo(
           displayImportant,
           displayUnread,
           optimisticLabels: labels,
-          emailContent,
         };
       }, [
         optimisticState.optimisticStarred,
@@ -212,6 +210,14 @@ const Thread = memo(
     const hasDraft = useMemo(() => {
       return !!latestDraft;
     }, [latestDraft]);
+
+    // Check if thread has attachments
+    const hasAttachments = useMemo(() => {
+      if (!getThreadData?.messages) return false;
+      return getThreadData.messages.some(
+        (msg) => msg.attachments && msg.attachments.length > 0
+      );
+    }, [getThreadData?.messages]);
 
     const content = useMemo(() => {
       if (!latestMessage || !getThreadData) return null;
@@ -455,11 +461,16 @@ const Thread = memo(
                           <TooltipContent className="p-1 text-xs">Draft</TooltipContent>
                         </Tooltip>
                       ) : null}
-                      {/* {hasNotes ? (
-                        <span className="inline-flex items-center">
-                          <StickyNote className="h-3 w-3 fill-amber-500 stroke-amber-500 dark:fill-amber-400 dark:stroke-amber-400" />
-                        </span>
-                      ) : null} */}
+                      {hasAttachments ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center">
+                              <Paperclip className="h-3 w-3 text-muted-foreground" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="p-1 text-xs">Has attachments</TooltipContent>
+                        </Tooltip>
+                      ) : null}
                       <MailLabels labels={optimisticLabels} />
                     </div>
                     {latestMessage.receivedOn ? (
@@ -497,15 +508,9 @@ const Thread = memo(
                     {threadLabels && (
                       <div className="mr-0 flex w-fit items-center justify-end gap-1">
                         {!isFolderSent ? <RenderLabels labels={threadLabels} /> : null}
-                        {/* {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null} */}
                       </div>
                     )}
                   </div>
-                  {emailContent && (
-                    <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
-                      {highlightText(emailContent, searchValue.highlight)}
-                    </div>
-                  )}
                   {/* {mainSearchTerm && (
                     <div className="text-muted-foreground mt-1 flex items-center gap-1 text-xs">
                       <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5">
@@ -536,7 +541,6 @@ const Thread = memo(
       isMailBulkSelected,
       threadLabels,
       optimisticLabels,
-      emailContent,
     ]);
 
     return latestMessage ? (

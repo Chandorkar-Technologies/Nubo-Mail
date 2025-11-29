@@ -23,6 +23,7 @@ import { peopleRouter } from './routes/teammates'; // Renamed from teammates to 
 import { notificationsRouter } from './routes/notifications';
 import { attachmentsRouter } from './routes/attachments';
 import { driveRouter } from './routes/drive';
+import { pushRouter } from './routes/push';
 
 export const appRouter = router({
   ai: aiRouter,
@@ -40,6 +41,7 @@ export const appRouter = router({
   notes: notesRouter,
   notifications: notificationsRouter,
   people: peopleRouter,
+  push: pushRouter,
   shortcut: shortcutRouter,
   settings: settingsRouter,
   user: userRouter,

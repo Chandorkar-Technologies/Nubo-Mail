@@ -110,6 +110,9 @@ export type ZeroEnv = {
   ONLYOFFICE_URL?: string;
   ONLYOFFICE_JWT_SECRET?: string;
   DOCSPACE_API_KEY?: string;
+  // Web Push VAPID keys
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
 };
 
 const env = _env as ZeroEnv;

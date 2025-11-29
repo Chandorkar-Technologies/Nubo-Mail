@@ -162,13 +162,15 @@ export function applyEmailPreferences(
   const html = $.html();
 
   // Apply theme-specific styles
+  // In dark mode, we need to handle emails that have inline black text color
+  // by ensuring minimum contrast with !important overrides
   const themeStyles = `
     <style type="text/css">
       :host {
         display: block;
         line-height: 1.5;
         background-color: ${isDarkTheme ? '#1A1A1A' : '#ffffff'};
-        color: ${isDarkTheme ? '#ffffff' : '#000000'};
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'};
       }
 
       *, *::before, *::after {
@@ -178,11 +180,30 @@ export function applyEmailPreferences(
       body {
         margin: 0;
         padding: 0;
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'};
       }
+
+      /* Force readable text colors in dark mode */
+      ${isDarkTheme ? `
+      p, span, div, td, th, li, dd, dt, h1, h2, h3, h4, h5, h6, font, b, strong, i, em, u {
+        color: inherit !important;
+      }
+
+      /* Reset dark/black backgrounds to transparent in dark mode */
+      [style*="background-color: #000"],
+      [style*="background-color:#000"],
+      [style*="background: #000"],
+      [style*="background:#000"],
+      [bgcolor="#000000"],
+      [bgcolor="black"] {
+        background-color: transparent !important;
+        background: transparent !important;
+      }
+      ` : ''}
 
       a {
         cursor: pointer;
-        color: ${isDarkTheme ? '#60a5fa' : '#2563eb'};
+        color: ${isDarkTheme ? '#60a5fa' : '#2563eb'} !important;
         text-decoration: underline;
       }
 
@@ -215,6 +236,13 @@ export function applyEmailPreferences(
 
       [data-theme-color="muted"] {
         color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
+      }
+
+      /* Ensure plain text emails are readable */
+      pre, code {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'};
       }
     </style>
   `;

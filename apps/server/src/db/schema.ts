@@ -761,3 +761,41 @@ export const driveShareAccessRelations = relations(driveShareAccess, ({ one }) =
     references: [user.id],
   }),
 }));
+
+// ==================== PUSH NOTIFICATIONS ====================
+
+export const pushSubscription = createTable(
+  'push_subscription',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // The push subscription endpoint URL
+    endpoint: text('endpoint').notNull(),
+    // Keys for encryption (p256dh and auth)
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    // Device/browser info for user to manage subscriptions
+    userAgent: text('user_agent'),
+    deviceName: text('device_name'),
+    // Notification preferences
+    notifyNewEmails: boolean('notify_new_emails').default(true),
+    notifyMentions: boolean('notify_mentions').default(true),
+    notifyImportant: boolean('notify_important').default(true),
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    lastUsedAt: timestamp('last_used_at'),
+  },
+  (t) => [
+    index('push_subscription_user_id_idx').on(t.userId),
+    index('push_subscription_endpoint_idx').on(t.endpoint),
+  ],
+);
+
+export const pushSubscriptionRelations = relations(pushSubscription, ({ one }) => ({
+  user: one(user, {
+    fields: [pushSubscription.userId],
+    references: [user.id],
+  }),
+}));

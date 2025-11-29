@@ -375,10 +375,26 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
     ],
   };
 
+  const pushNotificationWorkflow: WorkflowDefinition = {
+    name: 'push-notification',
+    description: 'Sends push notifications for new emails',
+    steps: [
+      {
+        id: 'send-push-notification',
+        name: 'Send Push Notification',
+        description: 'Sends push notification to user devices for new emails',
+        enabled: true,
+        action: workflowFunctions.sendPushNotification,
+        errorHandling: 'continue',
+      },
+    ],
+  };
+
   engine.registerWorkflow(autoDraftWorkflow);
   engine.registerWorkflow(vectorizationWorkflow);
   engine.registerWorkflow(threadSummaryWorkflow);
   engine.registerWorkflow(labelGenerationWorkflow);
+  engine.registerWorkflow(pushNotificationWorkflow);
 
   return engine;
 };

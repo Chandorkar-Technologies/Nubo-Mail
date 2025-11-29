@@ -24,10 +24,14 @@ import { analyzeEmailIntent, generateAutomaticDraft } from './index';
 import { getPrompt, getEmbeddingVector } from '../pipelines.effect';
 import { messageToXML, threadToXML } from './workflow-utils';
 import type { WorkflowContext } from './workflow-engine';
+import { sendPushToUser } from '../lib/web-push';
 import { bulkDeleteKeys } from '../lib/bulk-delete';
+import { pushSubscription, connection } from '../db/schema';
 import { getPromptName } from '../pipelines';
 import { env } from 'cloudflare:workers';
+import { createDb } from '../db';
 import { Effect } from 'effect';
+import { eq } from 'drizzle-orm';
 
 export type WorkflowFunction = (context: WorkflowContext) => Promise<any>;
 
@@ -628,6 +632,117 @@ Thread Summary: ${summaryResult.summary}`;
     } else {
       console.log('[WORKFLOW_FUNCTIONS] No label changes needed - labels already match');
       return { applied: false, created: createdLabels.length };
+    }
+  },
+
+  sendPushNotification: async (context) => {
+    console.log('[WORKFLOW_FUNCTIONS] Sending push notification for thread:', context.threadId);
+
+    // Check if VAPID keys are configured
+    if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) {
+      console.log('[WORKFLOW_FUNCTIONS] Push notifications not configured (missing VAPID keys)');
+      return { sent: 0, failed: 0, expired: [] };
+    }
+
+    // Get the latest message in the thread
+    const latestMessage = context.thread.messages?.[context.thread.messages.length - 1];
+    if (!latestMessage) {
+      console.log('[WORKFLOW_FUNCTIONS] No messages in thread, skipping push notification');
+      return { sent: 0, failed: 0, expired: [] };
+    }
+
+    // Skip notification if the latest message was sent by the user themselves
+    if (latestMessage.sender?.email === context.foundConnection.email) {
+      console.log('[WORKFLOW_FUNCTIONS] Latest message is from user, skipping push notification');
+      return { sent: 0, failed: 0, expired: [] };
+    }
+
+    try {
+      // Get database connection
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+
+      // Get user ID from connection
+      const [foundConn] = await db
+        .select({ userId: connection.userId })
+        .from(connection)
+        .where(eq(connection.id, context.connectionId))
+        .limit(1);
+
+      if (!foundConn?.userId) {
+        console.log('[WORKFLOW_FUNCTIONS] No user found for connection');
+        await conn.end();
+        return { sent: 0, failed: 0, expired: [] };
+      }
+
+      // Get all push subscriptions for this user that have notifications enabled
+      const subscriptions = await db
+        .select({
+          endpoint: pushSubscription.endpoint,
+          p256dh: pushSubscription.p256dh,
+          auth: pushSubscription.auth,
+          id: pushSubscription.id,
+        })
+        .from(pushSubscription)
+        .where(eq(pushSubscription.userId, foundConn.userId));
+
+      if (subscriptions.length === 0) {
+        console.log('[WORKFLOW_FUNCTIONS] No push subscriptions found for user');
+        await conn.end();
+        return { sent: 0, failed: 0, expired: [] };
+      }
+
+      // Build notification payload
+      const senderName = latestMessage.sender?.name || latestMessage.sender?.email || 'Unknown';
+      const subject = context.thread.subject || latestMessage.subject || '(No subject)';
+
+      const payload = {
+        title: `${senderName}`,
+        body: subject.length > 50 ? `${subject.substring(0, 50)}...` : subject,
+        icon: '/icons-pwa/icon-192.png',
+        badge: '/icons-pwa/icon-192.png',
+        tag: `thread-${context.threadId}`,
+        data: {
+          threadId: context.threadId,
+          connectionId: context.connectionId,
+          url: `/mail/inbox?threadId=${context.threadId}&connectionId=${context.connectionId}`,
+        },
+        actions: [
+          { action: 'open', title: 'Open' },
+          { action: 'dismiss', title: 'Dismiss' },
+        ],
+      };
+
+      console.log('[WORKFLOW_FUNCTIONS] Sending push to', subscriptions.length, 'subscriptions');
+
+      // Send push notifications
+      const result = await sendPushToUser(subscriptions, payload);
+
+      console.log('[WORKFLOW_FUNCTIONS] Push notification result:', result);
+
+      // Delete expired subscriptions
+      if (result.expired.length > 0) {
+        console.log(
+          '[WORKFLOW_FUNCTIONS] Removing',
+          result.expired.length,
+          'expired subscriptions',
+        );
+        for (const endpoint of result.expired) {
+          await db
+            .delete(pushSubscription)
+            .where(eq(pushSubscription.endpoint, endpoint));
+        }
+      }
+
+      await conn.end();
+
+      return {
+        sent: result.sent,
+        failed: result.failed,
+        expired: result.expired,
+      };
+    } catch (error) {
+      console.error('[WORKFLOW_FUNCTIONS] Error sending push notification:', error);
+      return { sent: 0, failed: 0, expired: [], error: String(error) };
     }
   },
 };
