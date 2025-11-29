@@ -49,7 +49,13 @@ export class SyncEngine {
             try {
                 // Get current mailbox status
                 const mailboxStatus = client.mailbox;
-                const currentUidValidity = mailboxStatus?.uidValidity ?? 0;
+                if (!mailboxStatus) {
+                    this.logger.error(`Failed to get mailbox status for connection ${conn.id}`);
+                    lock.release();
+                    await client.logout();
+                    return;
+                }
+                const currentUidValidity = mailboxStatus.uidValidity ?? 0;
 
                 // Get saved sync state
                 const syncState = await this.db.getSyncState(conn.id);
