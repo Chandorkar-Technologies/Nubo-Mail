@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
 import jwt from '@tsndr/cloudflare-worker-jwt';
+import { resend } from '../../lib/services';
 
 // Helper to get file extension
 function getFileExtension(filename: string): string {
@@ -891,6 +892,7 @@ export const driveRouter = router({
         input.accessToken,
         input.fileIds,
         sessionUser.id,
+        sessionUser.email,
         jobId,
         input.targetFolderId || null,
         ctx.db,
@@ -1055,6 +1057,7 @@ export const driveRouter = router({
         input.accessToken,
         input.fileIds,
         sessionUser.id,
+        sessionUser.email,
         jobId,
         input.targetFolderId || null,
         ctx.db,
@@ -1067,6 +1070,114 @@ export const driveRouter = router({
       ctx.c.executionCtx.waitUntil(importPromise);
 
       return { jobId };
+    }),
+
+  // Import entire Google Drive (recursive)
+  importEntireGoogleDrive: privateProcedure
+    .input(z.object({
+      accessToken: z.string(),
+      targetFolderId: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+      const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
+
+      // First, get all file IDs recursively
+      console.log(`[GoogleDriveImport] Starting full drive scan for user ${sessionUser.id}`);
+      const allFileIds = await getAllGoogleDriveFiles(input.accessToken);
+      console.log(`[GoogleDriveImport] Found ${allFileIds.length} files to import`);
+
+      if (allFileIds.length === 0) {
+        return { jobId: null, totalFiles: 0 };
+      }
+
+      // Create import job
+      const jobId = crypto.randomUUID();
+      await ctx.db.insert(driveImportJob).values({
+        id: jobId,
+        userId: sessionUser.id,
+        source: 'google_drive',
+        status: 'processing',
+        totalFiles: allFileIds.length,
+        processedFiles: 0,
+        failedFiles: 0,
+        sourceFileIds: allFileIds,
+        targetFolderId: input.targetFolderId || null,
+        startedAt: new Date(),
+        createdAt: new Date(),
+      });
+
+      // Process files using waitUntil to keep worker alive
+      const importPromise = processGoogleDriveImport(
+        input.accessToken,
+        allFileIds,
+        sessionUser.id,
+        sessionUser.email,
+        jobId,
+        input.targetFolderId || null,
+        ctx.db,
+        bucket,
+      ).catch((error) => {
+        console.error('[GoogleDriveImport] Full import failed:', error);
+      });
+
+      ctx.c.executionCtx.waitUntil(importPromise);
+
+      return { jobId, totalFiles: allFileIds.length };
+    }),
+
+  // Import entire OneDrive (recursive)
+  importEntireOneDrive: privateProcedure
+    .input(z.object({
+      accessToken: z.string(),
+      targetFolderId: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+      const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
+
+      // First, get all file IDs recursively
+      console.log(`[OneDriveImport] Starting full drive scan for user ${sessionUser.id}`);
+      const allFileIds = await getAllOneDriveFiles(input.accessToken);
+      console.log(`[OneDriveImport] Found ${allFileIds.length} files to import`);
+
+      if (allFileIds.length === 0) {
+        return { jobId: null, totalFiles: 0 };
+      }
+
+      // Create import job
+      const jobId = crypto.randomUUID();
+      await ctx.db.insert(driveImportJob).values({
+        id: jobId,
+        userId: sessionUser.id,
+        source: 'onedrive',
+        status: 'processing',
+        totalFiles: allFileIds.length,
+        processedFiles: 0,
+        failedFiles: 0,
+        sourceFileIds: allFileIds,
+        targetFolderId: input.targetFolderId || null,
+        startedAt: new Date(),
+        createdAt: new Date(),
+      });
+
+      // Process files using waitUntil to keep worker alive
+      const importPromise = processOneDriveImport(
+        input.accessToken,
+        allFileIds,
+        sessionUser.id,
+        sessionUser.email,
+        jobId,
+        input.targetFolderId || null,
+        ctx.db,
+        bucket,
+      ).catch((error) => {
+        console.error('[OneDriveImport] Full import failed:', error);
+      });
+
+      ctx.c.executionCtx.waitUntil(importPromise);
+
+      return { jobId, totalFiles: allFileIds.length };
     }),
 
   // ================== SHARING ENDPOINTS ==================
@@ -1447,11 +1558,156 @@ export const driveRouter = router({
     }),
 });
 
+// Helper to send import completion email
+async function sendImportCompletionEmail(
+  userEmail: string,
+  source: 'Google Drive' | 'OneDrive',
+  processedCount: number,
+  failedCount: number,
+  totalCount: number,
+) {
+  const status = failedCount === totalCount ? 'failed' : 'completed';
+  const subject = status === 'completed'
+    ? `✅ Your ${source} import is complete!`
+    : `❌ Your ${source} import encountered issues`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: ${status === 'completed' ? '#10b981' : '#ef4444'};">
+        ${status === 'completed' ? '🎉 Import Complete!' : '⚠️ Import Completed with Issues'}
+      </h2>
+      <p>Your ${source} import has finished processing.</p>
+      <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
+        <p style="margin: 0;"><strong>Summary:</strong></p>
+        <ul style="margin: 8px 0;">
+          <li>Total files: ${totalCount}</li>
+          <li style="color: #10b981;">Successfully imported: ${processedCount}</li>
+          ${failedCount > 0 ? `<li style="color: #ef4444;">Failed: ${failedCount}</li>` : ''}
+        </ul>
+      </div>
+      <p>You can view your imported files in <a href="https://nubo.email/drive" style="color: #3b82f6;">Nubo Drive</a>.</p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+      <p style="color: #6b7280; font-size: 12px;">This email was sent from Nubo. Please do not reply to this email.</p>
+    </div>
+  `;
+
+  try {
+    await resend().emails.send({
+      from: 'Nubo <noreply@nubo.email>',
+      to: userEmail,
+      subject,
+      html,
+    });
+    console.log(`[ImportEmail] Sent completion email to ${userEmail}`);
+  } catch (error) {
+    console.error('[ImportEmail] Failed to send email:', error);
+  }
+}
+
+// Helper to recursively get all files from Google Drive
+async function getAllGoogleDriveFiles(
+  accessToken: string,
+  folderId?: string,
+): Promise<string[]> {
+  const allFileIds: string[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const query = folderId
+      ? `'${folderId}' in parents and trashed = false`
+      : "'root' in parents and trashed = false";
+
+    const params = new URLSearchParams({
+      q: query,
+      fields: 'nextPageToken, files(id, mimeType)',
+      pageSize: '1000',
+    });
+
+    if (pageToken) {
+      params.append('pageToken', pageToken);
+    }
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      console.error('[GoogleDriveImport] Failed to list files:', await response.text());
+      break;
+    }
+
+    const data = await response.json() as {
+      files: Array<{ id: string; mimeType: string }>;
+      nextPageToken?: string;
+    };
+
+    for (const file of data.files) {
+      if (file.mimeType === 'application/vnd.google-apps.folder') {
+        // Recursively get files from subfolder
+        const subFiles = await getAllGoogleDriveFiles(accessToken, file.id);
+        allFileIds.push(...subFiles);
+      } else {
+        allFileIds.push(file.id);
+      }
+    }
+
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return allFileIds;
+}
+
+// Helper to recursively get all files from OneDrive
+async function getAllOneDriveFiles(
+  accessToken: string,
+  folderId?: string,
+): Promise<string[]> {
+  const allFileIds: string[] = [];
+  let nextLink: string | undefined;
+
+  const baseUrl = folderId
+    ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
+    : 'https://graph.microsoft.com/v1.0/me/drive/root/children';
+
+  let url = `${baseUrl}?$select=id,folder&$top=999`;
+
+  do {
+    const response = await fetch(nextLink || url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      console.error('[OneDriveImport] Failed to list files:', await response.text());
+      break;
+    }
+
+    const data = await response.json() as {
+      value: Array<{ id: string; folder?: object }>;
+      '@odata.nextLink'?: string;
+    };
+
+    for (const item of data.value) {
+      if (item.folder) {
+        // Recursively get files from subfolder
+        const subFiles = await getAllOneDriveFiles(accessToken, item.id);
+        allFileIds.push(...subFiles);
+      } else {
+        allFileIds.push(item.id);
+      }
+    }
+
+    nextLink = data['@odata.nextLink'];
+  } while (nextLink);
+
+  return allFileIds;
+}
+
 // Background import processor for Google Drive
 async function processGoogleDriveImport(
   accessToken: string,
   fileIds: string[],
   userId: string,
+  userEmail: string,
   jobId: string,
   targetFolderId: string | null,
   db: NeonHttpDatabase<typeof schema>,
@@ -1600,6 +1856,9 @@ async function processGoogleDriveImport(
       completedAt: new Date(),
     })
     .where(eq(driveImportJob.id, jobId));
+
+  // Send completion email
+  await sendImportCompletionEmail(userEmail, 'Google Drive', processed, failed, fileIds.length);
 }
 
 // Background import processor for OneDrive
@@ -1607,6 +1866,7 @@ async function processOneDriveImport(
   accessToken: string,
   fileIds: string[],
   userId: string,
+  userEmail: string,
   jobId: string,
   targetFolderId: string | null,
   db: NeonHttpDatabase<typeof schema>,
@@ -1691,4 +1951,7 @@ async function processOneDriveImport(
       completedAt: new Date(),
     })
     .where(eq(driveImportJob.id, jobId));
+
+  // Send completion email
+  await sendImportCompletionEmail(userEmail, 'OneDrive', processed, failed, fileIds.length);
 }

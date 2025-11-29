@@ -119,6 +119,8 @@ export default function DrivePage() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importSource, setImportSource] = useState<'google_drive' | 'onedrive' | null>(null);
   const [importAccessToken, setImportAccessToken] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_isFullDriveImport, setIsFullDriveImport] = useState(false);
   const [importFiles, setImportFiles] = useState<Array<{
     id: string;
     name: string;
@@ -243,10 +245,12 @@ export default function DrivePage() {
   const exchangeGoogleCodeMutation = useMutation(trpc.drive.exchangeGoogleDriveCode.mutationOptions());
   const listGoogleFilesMutation = useMutation(trpc.drive.listGoogleDriveFiles.mutationOptions());
   const importFromGoogleMutation = useMutation(trpc.drive.importFromGoogleDrive.mutationOptions());
+  const importEntireGoogleDriveMutation = useMutation(trpc.drive.importEntireGoogleDrive.mutationOptions());
   const getOneDriveAuthUrlMutation = useMutation(trpc.drive.getOneDriveAuthUrl.mutationOptions());
   const exchangeOneDriveCodeMutation = useMutation(trpc.drive.exchangeOneDriveCode.mutationOptions());
   const listOneDriveFilesMutation = useMutation(trpc.drive.listOneDriveFiles.mutationOptions());
   const importFromOneDriveMutation = useMutation(trpc.drive.importFromOneDrive.mutationOptions());
+  const importEntireOneDriveMutation = useMutation(trpc.drive.importEntireOneDrive.mutationOptions());
 
   // Invalidate queries helper
   const invalidate = () => {
@@ -510,6 +514,8 @@ export default function DrivePage() {
                 )
               );
               toast.success(`Uploaded ${upload.file.name}`);
+              // Immediately refresh the file list after each upload
+              invalidate();
               resolve();
             } else {
               reject(new Error(`Upload failed: ${xhr.status}`));
@@ -546,8 +552,9 @@ export default function DrivePage() {
   }, [currentFolderId]);
 
   // Import handlers
-  const handleStartImport = async (source: 'google_drive' | 'onedrive') => {
+  const handleStartImport = async (source: 'google_drive' | 'onedrive', fullDrive = false) => {
     setImportSource(source);
+    setIsFullDriveImport(fullDrive);
     setIsImportOpen(true);
 
     const redirectUri = `${window.location.origin}/drive`;
@@ -569,7 +576,7 @@ export default function DrivePage() {
 
           if (event.data?.type === 'oauth_callback' && event.data?.code) {
             window.removeEventListener('message', handleMessage);
-            handleOAuthCallback(source, event.data.code, redirectUri);
+            handleOAuthCallback(source, event.data.code, redirectUri, fullDrive);
           }
         };
 
@@ -586,10 +593,11 @@ export default function DrivePage() {
     } catch {
       toast.error('Failed to start import');
       setIsImportOpen(false);
+      setIsFullDriveImport(false);
     }
   };
 
-  const handleOAuthCallback = async (source: 'google_drive' | 'onedrive', code: string, redirectUri: string) => {
+  const handleOAuthCallback = async (source: 'google_drive' | 'onedrive', code: string, redirectUri: string, fullDrive = false) => {
     setImportLoading(true);
     try {
       let accessToken: string;
@@ -601,12 +609,98 @@ export default function DrivePage() {
         accessToken = result.accessToken;
       }
       setImportAccessToken(accessToken);
-      await loadImportFiles(source, accessToken);
+
+      // If full drive import, start it immediately
+      if (fullDrive) {
+        await handleConfirmFullDriveImport(source, accessToken);
+      } else {
+        await loadImportFiles(source, accessToken);
+      }
     } catch {
       toast.error('Failed to authenticate');
       setIsImportOpen(false);
+      setIsFullDriveImport(false);
     } finally {
       setImportLoading(false);
+    }
+  };
+
+  const handleConfirmFullDriveImport = async (source: 'google_drive' | 'onedrive', accessToken: string) => {
+    setIsImporting(true);
+    try {
+      let result: { jobId: string | null; totalFiles: number };
+      if (source === 'google_drive') {
+        result = await importEntireGoogleDriveMutation.mutateAsync({
+          accessToken,
+          targetFolderId: currentFolderId,
+        });
+      } else {
+        result = await importEntireOneDriveMutation.mutateAsync({
+          accessToken,
+          targetFolderId: currentFolderId,
+        });
+      }
+
+      if (!result.jobId || result.totalFiles === 0) {
+        toast.info('No files found to import');
+        setIsImportOpen(false);
+        setIsFullDriveImport(false);
+        return;
+      }
+
+      // Set active import job for progress tracking
+      setActiveImportJob({
+        jobId: result.jobId,
+        totalFiles: result.totalFiles,
+        processedFiles: 0,
+        failedFiles: 0,
+        status: 'processing',
+      });
+
+      toast.success(`Importing ${result.totalFiles} files from your ${source === 'google_drive' ? 'Google Drive' : 'OneDrive'}. You'll receive an email when complete.`);
+
+      // Reset import dialog state
+      setIsImportOpen(false);
+      setIsFullDriveImport(false);
+      setImportSource(null);
+      setImportAccessToken(null);
+
+      // Poll for job status
+      const pollInterval = setInterval(async () => {
+        try {
+          const job = await trpc.drive.getImportJob.query({ jobId: result.jobId! });
+          setActiveImportJob({
+            jobId: result.jobId!,
+            totalFiles: job.totalFiles,
+            processedFiles: job.processedFiles,
+            failedFiles: job.failedFiles,
+            status: job.status as 'processing' | 'completed' | 'failed',
+          });
+
+          if (job.status === 'completed' || job.status === 'failed') {
+            clearInterval(pollInterval);
+            invalidate();
+
+            if (job.status === 'completed') {
+              toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles > 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
+            } else {
+              toast.error(`Import failed. ${job.processedFiles} succeeded, ${job.failedFiles} failed.`);
+            }
+
+            // Clear active job after a delay
+            setTimeout(() => setActiveImportJob(null), 3000);
+          }
+        } catch (error) {
+          console.error('Failed to poll job status:', error);
+          clearInterval(pollInterval);
+        }
+      }, 2000);
+
+    } catch {
+      toast.error('Failed to start import');
+      setActiveImportJob(null);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -794,11 +888,20 @@ export default function DrivePage() {
               <DropdownMenuContent>
                 <DropdownMenuItem onClick={() => handleStartImport('google_drive')}>
                   <CloudDownload className="mr-2 h-4 w-4" />
-                  From Google Drive
+                  Select from Google Drive
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleStartImport('google_drive', true)}>
+                  <HardDrive className="mr-2 h-4 w-4" />
+                  Import Entire Google Drive
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => handleStartImport('onedrive')}>
                   <CloudDownload className="mr-2 h-4 w-4" />
-                  From OneDrive
+                  Select from OneDrive
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleStartImport('onedrive', true)}>
+                  <HardDrive className="mr-2 h-4 w-4" />
+                  Import Entire OneDrive
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1030,8 +1133,8 @@ export default function DrivePage() {
                 key={file.id}
                 className="group relative flex flex-col items-center rounded-lg border p-4 hover:bg-accent cursor-pointer"
                 onDoubleClick={() => {
-                  // PDF and images open in preview, editable files open in editor, others download
-                  if (file.isPdf || file.isImage) {
+                  // PDF, images, and videos open in preview; editable files open in editor; others download
+                  if (file.isPdf || file.isImage || file.isVideo) {
                     handlePreview(file.id, file.name, file.mimeType);
                   } else if (file.isEditable) {
                     handleOpenEditor(file.id);
@@ -1188,8 +1291,8 @@ export default function DrivePage() {
                     key={file.id}
                     className="border-t hover:bg-accent cursor-pointer"
                     onDoubleClick={() => {
-                      // PDF and images open in preview, editable files open in editor, others download
-                      if (file.isPdf || file.isImage) {
+                      // PDF, images, and videos open in preview; editable files open in editor; others download
+                      if (file.isPdf || file.isImage || file.isVideo) {
                         handlePreview(file.id, file.name, file.mimeType);
                       } else if (file.isEditable) {
                         handleOpenEditor(file.id);
