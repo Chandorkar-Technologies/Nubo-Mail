@@ -6,6 +6,7 @@ import type * as schema from '../../db/schema';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
+import jwt from '@tsndr/cloudflare-worker-jwt';
 
 // Helper to get file extension
 function getFileExtension(filename: string): string {
@@ -28,7 +29,7 @@ function isEditableInOnlyOffice(_mimeType: string, filename: string): boolean {
 }
 
 // Helper to check if file can be previewed (includes PDF)
-function isPreviewable(_mimeType: string, filename: string): boolean {
+function isPreviewable(mimeType: string, filename: string): boolean {
   const ext = getFileExtension(filename);
   const previewableExtensions = [
     // Documents
@@ -41,7 +42,13 @@ function isPreviewable(_mimeType: string, filename: string): boolean {
     'pdf',
     // Images
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
+    // Videos
+    'mp4', 'webm', 'ogg', 'mov',
   ];
+  // Also check MIME type for videos and images
+  if (mimeType.startsWith('video/') || mimeType.startsWith('image/')) {
+    return true;
+  }
   return previewableExtensions.includes(ext);
 }
 
@@ -53,6 +60,11 @@ function isPdf(filename: string): boolean {
 // Check if file is an image
 function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/');
+}
+
+// Check if file is a video
+function isVideo(mimeType: string): boolean {
+  return mimeType.startsWith('video/');
 }
 
 // Helper to get mime type category
@@ -140,6 +152,7 @@ export const driveRouter = router({
         isPreviewable: isPreviewable(file.mimeType, file.name),
         isPdf: isPdf(file.name),
         isImage: isImage(file.mimeType),
+        isVideo: isVideo(file.mimeType),
         category: getMimeCategory(file.mimeType),
         extension: getFileExtension(file.name),
       }));
@@ -349,10 +362,22 @@ export const driveRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'File not found in storage' });
       }
 
+      // Helper function to convert ArrayBuffer to base64 without stack overflow
+      const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const chunkSize = 8192; // Process in chunks to avoid call stack issues
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+          binary += String.fromCharCode.apply(null, Array.from(chunk));
+        }
+        return btoa(binary);
+      };
+
       // Return the file content as base64 for small files, or a download endpoint for large files
       if (file.size < 10 * 1024 * 1024) { // Less than 10MB
         const arrayBuffer = await object.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const base64 = arrayBufferToBase64(arrayBuffer);
         return {
           type: 'base64' as const,
           data: base64,
@@ -361,10 +386,11 @@ export const driveRouter = router({
         };
       }
 
-      // For larger files, return download endpoint
+      // For larger files, return download endpoint URL
+      const backendUrl = ctx.c.env.VITE_PUBLIC_BACKEND_URL || '';
       return {
         type: 'url' as const,
-        url: `/api/drive/download/${file.id}`,
+        url: `${backendUrl}/api/drive/download/${file.id}`,
         fileName: file.name,
       };
     }),
@@ -667,32 +693,8 @@ export const driveRouter = router({
         },
       };
 
-      // Sign the config with JWT
-      // Using a simple base64 encoding for the JWT payload
-      // In production, use a proper JWT library
-      const header = { alg: 'HS256', typ: 'JWT' };
-      const base64Header = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-      const base64Payload = btoa(JSON.stringify(config)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-
-      // Create signature using Web Crypto API
-      const encoder = new TextEncoder();
-      const keyData = encoder.encode(jwtSecret);
-      const key = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-      );
-      const signature = await crypto.subtle.sign(
-        'HMAC',
-        key,
-        encoder.encode(`${base64Header}.${base64Payload}`)
-      );
-      const base64Signature = btoa(String.fromCharCode(...new Uint8Array(signature)))
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-
-      const token = `${base64Header}.${base64Payload}.${base64Signature}`;
+      // Sign the config with JWT using the cloudflare-worker-jwt library
+      const token = await jwt.sign(config, jwtSecret, { algorithm: 'HS256' });
 
       return {
         config: {
@@ -1116,7 +1118,7 @@ export const driveRouter = router({
         };
       }
 
-      // For PDFs, return a signed URL or base64
+      // For PDFs, return base64
       if (isPdf(file.name)) {
         const object = await bucket.get(file.r2Key);
         if (!object) {
@@ -1127,6 +1129,34 @@ export const driveRouter = router({
         return {
           type: 'pdf' as const,
           mimeType: 'application/pdf',
+          data: base64,
+          fileName: file.name,
+        };
+      }
+
+      // For videos, return base64 for small files or URL for large files
+      if (isVideo(file.mimeType)) {
+        const object = await bucket.get(file.r2Key);
+        if (!object) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'File content not found' });
+        }
+
+        // For videos larger than 50MB, return URL instead of base64
+        if (file.size > 50 * 1024 * 1024) {
+          const backendUrl = workerEnv.VITE_PUBLIC_BACKEND_URL || '';
+          return {
+            type: 'video_url' as const,
+            mimeType: file.mimeType,
+            url: `${backendUrl}/api/drive/download/${file.id}`,
+            fileName: file.name,
+          };
+        }
+
+        const arrayBuffer = await object.arrayBuffer();
+        const base64 = arrayBufferToBase64(arrayBuffer);
+        return {
+          type: 'video' as const,
+          mimeType: file.mimeType,
           data: base64,
           fileName: file.name,
         };

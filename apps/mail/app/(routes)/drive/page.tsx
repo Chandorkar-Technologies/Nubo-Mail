@@ -154,6 +154,8 @@ export default function DrivePage() {
     name: string;
     mimeType: string;
     data?: string;
+    url?: string;
+    type?: 'image' | 'pdf' | 'video' | 'video_url';
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -379,7 +381,11 @@ export default function DrivePage() {
     setPreviewFile({ id: fileId, name: fileName, mimeType });
     try {
       const result = await getPreviewUrlMutation.mutateAsync({ fileId });
-      setPreviewFile({ id: fileId, name: fileName, mimeType, data: result.data });
+      if (result.type === 'video_url') {
+        setPreviewFile({ id: fileId, name: fileName, mimeType, url: result.url, type: 'video_url' });
+      } else {
+        setPreviewFile({ id: fileId, name: fileName, mimeType, data: result.data, type: result.type });
+      }
     } catch {
       toast.error('Failed to load preview');
       setPreviewFile(null);
@@ -1564,8 +1570,8 @@ export default function DrivePage() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 <span className="ml-2 text-muted-foreground">Loading preview...</span>
               </div>
-            ) : previewFile?.data ? (
-              previewFile.mimeType.startsWith('image/') ? (
+            ) : previewFile?.data || previewFile?.url ? (
+              previewFile.type === 'image' || previewFile.mimeType.startsWith('image/') ? (
                 <div className="flex items-center justify-center p-4">
                   <img
                     src={`data:${previewFile.mimeType};base64,${previewFile.data}`}
@@ -1573,12 +1579,34 @@ export default function DrivePage() {
                     className="max-w-full max-h-[70vh] object-contain"
                   />
                 </div>
-              ) : previewFile.mimeType === 'application/pdf' ? (
+              ) : previewFile.type === 'pdf' || previewFile.mimeType === 'application/pdf' ? (
                 <iframe
                   src={`data:application/pdf;base64,${previewFile.data}`}
                   className="w-full h-[70vh]"
                   title={previewFile.name}
                 />
+              ) : previewFile.type === 'video' ? (
+                <div className="flex items-center justify-center p-4">
+                  <video
+                    controls
+                    autoPlay={false}
+                    className="max-w-full max-h-[70vh]"
+                    src={`data:${previewFile.mimeType};base64,${previewFile.data}`}
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+              ) : previewFile.type === 'video_url' && previewFile.url ? (
+                <div className="flex items-center justify-center p-4">
+                  <video
+                    controls
+                    autoPlay={false}
+                    className="max-w-full max-h-[70vh]"
+                    src={previewFile.url}
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
               ) : (
                 <div className="flex items-center justify-center py-24 text-muted-foreground">
                   Preview not available for this file type
