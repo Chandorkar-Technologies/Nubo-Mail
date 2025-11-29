@@ -192,12 +192,14 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
   const autoDraftWorkflow: WorkflowDefinition = {
     name: 'auto-draft-generation',
     description: 'Automatically generates drafts for threads that require responses',
+    // DISABLED: Auto-draft generation consumes too many AI tokens
+    // To re-enable, set enabled: true on all steps below
     steps: [
       {
         id: 'check-draft-eligibility',
         name: 'Check Draft Eligibility',
         description: 'Determines if a draft should be generated for this thread',
-        enabled: true,
+        enabled: false,
         errorHandling: 'fail',
         condition: async (context) => {
           const shouldGenerate = await shouldGenerateDraft(context.thread, context.foundConnection);
@@ -216,21 +218,21 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         id: 'analyze-email-intent',
         name: 'Analyze Email Intent',
         description: 'Analyzes the intent of the latest email in the thread',
-        enabled: true,
+        enabled: false,
         action: workflowFunctions.analyzeEmailIntent,
       },
       {
         id: 'validate-response-needed',
         name: 'Validate Response Needed',
         description: 'Checks if the email requires a response based on intent analysis',
-        enabled: true,
+        enabled: false,
         action: workflowFunctions.validateResponseNeeded,
       },
       {
         id: 'generate-draft-content',
         name: 'Generate Draft Content',
         description: 'Generates the draft email content using AI',
-        enabled: true,
+        enabled: false,
         action: workflowFunctions.generateAutomaticDraft,
         errorHandling: 'continue',
       },
@@ -238,7 +240,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         id: 'create-draft',
         name: 'Create Draft',
         description: 'Creates the draft in the email system',
-        enabled: true,
+        enabled: false,
         action: workflowFunctions.createDraft,
         errorHandling: 'continue',
       },
@@ -246,7 +248,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         id: 'cleanup-workflow-execution',
         name: 'Cleanup Workflow Execution',
         description: 'Removes workflow execution tracking',
-        enabled: true,
+        enabled: false,
         action: workflowFunctions.cleanupWorkflowExecution,
         errorHandling: 'continue',
       },
