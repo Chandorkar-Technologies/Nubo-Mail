@@ -1,12 +1,12 @@
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { getContext } from 'hono/context-storage';
-import { connection } from '../db/schema';
+import { connection, email } from '../db/schema';
 import { defaultPageSize } from './utils';
 import type { HonoContext } from '../ctx';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { createDb } from '../db';
 import { Effect } from 'effect';
 import { env } from '../env';
@@ -312,6 +312,103 @@ export const modifyThreadLabelsInDB = async (
   await sendDoState(connectionId);
 };
 
+/**
+ * Modify thread labels for IMAP connections (stored in Postgres email table)
+ */
+export const modifyImapThreadLabelsInDB = async (
+  connectionId: string,
+  threadId: string,
+  addLabels: string[],
+  removeLabels: string[],
+) => {
+  const { db } = createDb(env.HYPERDRIVE.connectionString);
+
+  console.log(`[IMAP modifyLabels] connectionId=${connectionId}, threadId=${threadId}`);
+  console.log(`[IMAP modifyLabels] addLabels=${JSON.stringify(addLabels)}, removeLabels=${JSON.stringify(removeLabels)}`);
+
+  // Handle UNREAD label -> isRead field
+  if (removeLabels.includes('UNREAD')) {
+    const result = await db
+      .update(email)
+      .set({ isRead: true, updatedAt: new Date() })
+      .where(and(
+        eq(email.connectionId, connectionId),
+        eq(email.threadId, threadId)
+      ))
+      .returning({ id: email.id });
+    console.log(`[IMAP modifyLabels] Marked as read, affected rows: ${result.length}`);
+  }
+
+  if (addLabels.includes('UNREAD')) {
+    const result = await db
+      .update(email)
+      .set({ isRead: false, updatedAt: new Date() })
+      .where(and(
+        eq(email.connectionId, connectionId),
+        eq(email.threadId, threadId)
+      ))
+      .returning({ id: email.id });
+    console.log(`[IMAP modifyLabels] Marked as unread, affected rows: ${result.length}`);
+  }
+
+  // Handle TRASH label -> delete the emails
+  if (addLabels.includes('TRASH')) {
+    const result = await db
+      .delete(email)
+      .where(and(
+        eq(email.connectionId, connectionId),
+        eq(email.threadId, threadId)
+      ))
+      .returning({ id: email.id });
+    console.log(`[IMAP modifyLabels] Deleted thread, affected rows: ${result.length}`);
+  }
+
+  // Handle STARRED label -> isStarred field
+  if (addLabels.includes('STARRED')) {
+    const result = await db
+      .update(email)
+      .set({ isStarred: true, updatedAt: new Date() })
+      .where(and(
+        eq(email.connectionId, connectionId),
+        eq(email.threadId, threadId)
+      ))
+      .returning({ id: email.id });
+    console.log(`[IMAP modifyLabels] Starred thread, affected rows: ${result.length}`);
+  }
+
+  if (removeLabels.includes('STARRED')) {
+    const result = await db
+      .update(email)
+      .set({ isStarred: false, updatedAt: new Date() })
+      .where(and(
+        eq(email.connectionId, connectionId),
+        eq(email.threadId, threadId)
+      ))
+      .returning({ id: email.id });
+    console.log(`[IMAP modifyLabels] Unstarred thread, affected rows: ${result.length}`);
+  }
+
+  return { success: true, connectionId, threadId };
+};
+
+/**
+ * Delete thread for IMAP connections (stored in Postgres email table)
+ */
+export const deleteImapThread = async (connectionId: string, threadId: string) => {
+  const { db } = createDb(env.HYPERDRIVE.connectionString);
+
+  console.log(`[IMAP] Deleting thread ${threadId} from connection ${connectionId}`);
+
+  await db
+    .delete(email)
+    .where(and(
+      eq(email.connectionId, connectionId),
+      eq(email.threadId, threadId)
+    ));
+
+  console.log(`[IMAP] Thread ${threadId} deleted successfully`);
+};
+
 const getActiveShardId = async (connectionId: string) => {
   const registry = await getRegistryClient(connectionId);
   const allShards = await listShards(registry);
@@ -587,8 +684,16 @@ export const connectionToDriver = (activeConnection: typeof connection.$inferSel
       if (env.THREADS_BUCKET) bucket = env.THREADS_BUCKET;
       else throw new Error(`IMAP connections require a bucket to be passed to connectionToDriver`);
     }
+    // Extract IMAP/SMTP config from the connection's config field
+    const imapConfig = activeConnection.config as {
+      imap?: { host: string; port: number; secure: boolean };
+      smtp?: { host: string; port: number; secure: boolean };
+      auth?: { user: string; pass: string };
+    } | null;
+
     return createDriver('imap', {
       connectionId: activeConnection.id,
+      imapConfig: imapConfig || undefined,
       auth: {
         userId: activeConnection.userId,
         accessToken: '',

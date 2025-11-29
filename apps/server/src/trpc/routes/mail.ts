@@ -5,6 +5,7 @@ import {
   getZeroDB,
   getThread,
   modifyThreadLabelsInDB,
+  modifyImapThreadLabelsInDB,
   deleteAllSpam,
   reSyncThread,
   connectionToDriver,
@@ -72,11 +73,12 @@ export const mailRouter = router({
 
       if (activeConnection.providerId === 'imap') {
         const driver = connectionToDriver(activeConnection, env.THREADS_BUCKET);
-        return await driver.get(input.id);
+        const threadData = await driver.get(input.id);
+        return { ...threadData, connectionId: activeConnection.id };
       }
 
       const result = await getThread(activeConnection.id, input.id);
-      return result.result;
+      return { ...result.result, connectionId: activeConnection.id };
     }),
   listThreads: activeConnectionProcedure
     .input(
@@ -241,6 +243,21 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
+
+      console.log(`[markAsRead] providerId=${activeConnection.providerId}, connectionId=${activeConnection.id}, threadIds=${input.ids.join(',')}`);
+
+      // Use IMAP-specific function for IMAP connections
+      if (activeConnection.providerId === 'imap') {
+        console.log('[markAsRead] Using IMAP-specific path');
+        const results = await Promise.all(
+          input.ids.map((threadId) =>
+            modifyImapThreadLabelsInDB(activeConnection.id, threadId, [], ['UNREAD']),
+          ),
+        );
+        console.log('[markAsRead] IMAP results:', JSON.stringify(results));
+        return results;
+      }
+
       return Promise.all(
         input.ids.map((threadId) =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['UNREAD']),
@@ -256,6 +273,16 @@ export const mailRouter = router({
     // TODO: Add batching
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
+
+      // Use IMAP-specific function for IMAP connections
+      if (activeConnection.providerId === 'imap') {
+        return Promise.all(
+          input.ids.map((threadId) =>
+            modifyImapThreadLabelsInDB(activeConnection.id, threadId, ['UNREAD'], []),
+          ),
+        );
+      }
+
       return Promise.all(
         input.ids.map((threadId) =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['UNREAD'], []),
@@ -270,6 +297,16 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
+
+      // Use IMAP-specific function for IMAP connections
+      if (activeConnection.providerId === 'imap') {
+        return Promise.all(
+          input.ids.map((threadId) =>
+            modifyImapThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
+          ),
+        );
+      }
+
       return Promise.all(
         input.ids.map((threadId) =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
@@ -286,13 +323,28 @@ export const mailRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { activeConnection } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
       const { threadId, addLabels, removeLabels } = input;
 
-      console.log(`Server: updateThreadLabels called for thread ${threadId}`);
-      console.log(`Adding labels: ${addLabels.join(', ')}`);
-      console.log(`Removing labels: ${removeLabels.join(', ')}`);
+      console.log(`[modifyLabels] providerId=${activeConnection.providerId}, connectionId=${activeConnection.id}`);
+      console.log(`[modifyLabels] threadId=${threadId.join(',')}, addLabels=${addLabels.join(',')}, removeLabels=${removeLabels.join(',')}`);
+
+      // Use IMAP-specific function for IMAP connections
+      if (activeConnection.providerId === 'imap') {
+        console.log('[modifyLabels] Using IMAP-specific path');
+        if (threadId.length) {
+          await Promise.all(
+            threadId.map((id) =>
+              modifyImapThreadLabelsInDB(activeConnection.id, id, addLabels, removeLabels),
+            ),
+          );
+          console.log('[modifyLabels] IMAP labels modified successfully');
+          return { success: true };
+        }
+        return { success: false, error: 'No thread IDs provided' };
+      }
+
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
 
       const result = await agent.normalizeIds(threadId);
       const { threadIds } = result;
@@ -318,6 +370,24 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
+
+      // For IMAP connections, use IMAP-specific function
+      if (activeConnection.providerId === 'imap') {
+        // For IMAP, just toggle star (simple implementation - always star for now)
+        // TODO: Query current star state from Postgres for proper toggle
+        await Promise.all(
+          input.ids.map((threadId) =>
+            modifyImapThreadLabelsInDB(
+              activeConnection.id,
+              threadId,
+              ['STARRED'],
+              [],
+            ),
+          ),
+        );
+        return { success: true };
+      }
+
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
       const { threadIds } = await agent.normalizeIds(input.ids);
