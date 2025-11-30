@@ -82,6 +82,13 @@ export function Navigation() {
                     </Button>
                   </a>
                 </NavigationMenuItem>
+                <NavigationMenuItem className="bg-transparent text-white cursor-pointer">
+                  <a href="/download">
+                    <Button variant="ghost" className="ml-1 h-9 bg-transparent">
+                      Download
+                    </Button>
+                  </a>
+                </NavigationMenuItem>
               </NavigationMenuList>
             </NavigationMenu>
           </div>
@@ -146,6 +153,9 @@ export function Navigation() {
                 </Link>
                 <Link to="/pricing" onClick={() => setOpen(false)}>
                   Pricing
+                </Link>
+                <Link to="/download" onClick={() => setOpen(false)}>
+                  Download
                 </Link>
                 {aboutLinks.map((link) => (
                   <a key={link.title} href={link.href} className="block font-medium">

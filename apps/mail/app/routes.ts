@@ -12,6 +12,7 @@ export default [
     route('/pricing', '(full-width)/pricing.tsx'),
     route('/privacy', '(full-width)/privacy.tsx'),
     route('/contributors', '(full-width)/contributors.tsx'),
+    route('/download', '(full-width)/download.tsx'),
     route('/hr', '(full-width)/hr.tsx'),
     route('/meet/:meetingId', '(full-width)/meet/[meetingId]/page.tsx'),
     route('/drive/shared/:token', '(routes)/drive/shared/[token]/page.tsx'),

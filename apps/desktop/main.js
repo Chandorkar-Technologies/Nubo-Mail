@@ -35,8 +35,8 @@ function createWindow() {
     show: false, // Don't show until ready
   });
 
-  // Load the remote URL
-  mainWindow.loadURL(getAppUrl());
+  // Load the login page directly (skip landing page)
+  mainWindow.loadURL(`${getAppUrl()}/login`);
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
