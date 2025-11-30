@@ -1556,7 +1556,421 @@ export const driveRouter = router({
 
       return { username: userData?.username || null };
     }),
+
+  // Create a new blank file (document, spreadsheet, presentation)
+  createBlankFile: privateProcedure
+    .input(
+      z.object({
+        fileType: z.enum(['document', 'spreadsheet', 'presentation']),
+        fileName: z.string().min(1),
+        folderId: z.string().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { sessionUser } = ctx;
+      const { fileType, fileName, folderId } = input;
+
+      // Verify folder exists if provided
+      if (folderId) {
+        const folder = await ctx.db.query.driveFolder.findFirst({
+          where: and(
+            eq(driveFolder.id, folderId),
+            eq(driveFolder.userId, sessionUser.id),
+          ),
+        });
+
+        if (!folder) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Folder not found' });
+        }
+      }
+
+      // Determine file extension and MIME type
+      let extension: string;
+      let mimeType: string;
+      let templateData: Uint8Array;
+
+      switch (fileType) {
+        case 'document':
+          extension = 'docx';
+          mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          templateData = createMinimalDocx();
+          break;
+        case 'spreadsheet':
+          extension = 'xlsx';
+          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          templateData = createMinimalXlsx();
+          break;
+        case 'presentation':
+          extension = 'pptx';
+          mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+          templateData = createMinimalPptx();
+          break;
+        default:
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid file type' });
+      }
+
+      // Ensure filename has correct extension
+      const baseName = fileName.replace(/\.(docx|xlsx|pptx)$/i, '');
+      const fullFileName = `${baseName}.${extension}`;
+
+      // Create file record
+      const fileId = crypto.randomUUID();
+      const r2Key = `drive/${sessionUser.id}/${fileId}/${fullFileName}`;
+
+      // Upload template to R2
+      await env.DRIVE_BUCKET.put(r2Key, templateData.buffer, {
+        httpMetadata: { contentType: mimeType },
+      });
+
+      // Insert file record
+      await ctx.db.insert(driveFile).values({
+        id: fileId,
+        userId: sessionUser.id,
+        folderId: folderId || null,
+        name: fullFileName,
+        mimeType,
+        size: templateData.byteLength,
+        r2Key,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      return {
+        fileId,
+        fileName: fullFileName,
+        editUrl: `/drive/edit/${fileId}`,
+      };
+    }),
 });
+
+// Helper functions to create minimal Office documents
+// These create valid but minimal Office Open XML files
+
+// Minimal DOCX creation (Word document)
+function createMinimalDocx(): Uint8Array {
+  // A DOCX file is a ZIP archive containing XML files
+  // This creates a minimal valid document that OnlyOffice can edit
+  const files: Record<string, string> = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    'word/document.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t></w:t></w:r></w:p>
+  </w:body>
+</w:document>`,
+  };
+  return createZipFromFiles(files);
+}
+
+// Minimal XLSX creation (Excel spreadsheet)
+function createMinimalXlsx(): Uint8Array {
+  const files: Record<string, string> = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`,
+    'xl/worksheets/sheet1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>`,
+  };
+  return createZipFromFiles(files);
+}
+
+// Minimal PPTX creation (PowerPoint presentation)
+function createMinimalPptx(): Uint8Array {
+  const files: Record<string, string> = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+  <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+</Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`,
+    'ppt/_rels/presentation.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+    'ppt/presentation.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId2"/></p:sldMasterIdLst>
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+  <p:sldSz cx="9144000" cy="6858000"/>
+</p:presentation>`,
+    'ppt/slides/_rels/slide1.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>`,
+    'ppt/slides/slide1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
+</p:sld>`,
+    'ppt/slideLayouts/_rels/slideLayout1.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+    'ppt/slideLayouts/slideLayout1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" type="blank">
+  <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
+</p:sldLayout>`,
+    'ppt/slideMasters/_rels/slideMaster1.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>`,
+    'ppt/slideMasters/slideMaster1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
+  <p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>
+</p:sldMaster>`,
+  };
+  return createZipFromFiles(files);
+}
+
+// Simple ZIP file creator (uncompressed)
+function createZipFromFiles(files: Record<string, string>): Uint8Array {
+  const entries: Array<{ name: string; data: Uint8Array }> = [];
+
+  for (const [name, content] of Object.entries(files)) {
+    const encoder = new TextEncoder();
+    entries.push({ name, data: encoder.encode(content) });
+  }
+
+  // Calculate total size needed
+  let totalSize = 0;
+  const localHeaders: Array<{ offset: number; name: Uint8Array; data: Uint8Array }> = [];
+
+  for (const entry of entries) {
+    const nameBytes = new TextEncoder().encode(entry.name);
+    localHeaders.push({
+      offset: totalSize,
+      name: nameBytes,
+      data: entry.data,
+    });
+    // Local file header (30) + filename + file data
+    totalSize += 30 + nameBytes.length + entry.data.length;
+  }
+
+  const centralDirStart = totalSize;
+
+  // Calculate central directory size
+  let centralDirSize = 0;
+  for (const entry of entries) {
+    const nameBytes = new TextEncoder().encode(entry.name);
+    centralDirSize += 46 + nameBytes.length;
+  }
+
+  // End of central directory record
+  const eocdSize = 22;
+  totalSize += centralDirSize + eocdSize;
+
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+
+  let offset = 0;
+
+  // Write local file headers and data
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const nameBytes = new TextEncoder().encode(entry.name);
+
+    // Local file header signature
+    view.setUint32(offset, 0x04034b50, true);
+    offset += 4;
+
+    // Version needed to extract
+    view.setUint16(offset, 20, true);
+    offset += 2;
+
+    // General purpose bit flag
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // Compression method (0 = stored)
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File last modification time
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File last modification date
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // CRC-32
+    view.setUint32(offset, crc32(entry.data), true);
+    offset += 4;
+
+    // Compressed size
+    view.setUint32(offset, entry.data.length, true);
+    offset += 4;
+
+    // Uncompressed size
+    view.setUint32(offset, entry.data.length, true);
+    offset += 4;
+
+    // File name length
+    view.setUint16(offset, nameBytes.length, true);
+    offset += 2;
+
+    // Extra field length
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File name
+    bytes.set(nameBytes, offset);
+    offset += nameBytes.length;
+
+    // File data
+    bytes.set(entry.data, offset);
+    offset += entry.data.length;
+  }
+
+  // Write central directory
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const header = localHeaders[i];
+    const nameBytes = new TextEncoder().encode(entry.name);
+
+    // Central directory file header signature
+    view.setUint32(offset, 0x02014b50, true);
+    offset += 4;
+
+    // Version made by
+    view.setUint16(offset, 20, true);
+    offset += 2;
+
+    // Version needed to extract
+    view.setUint16(offset, 20, true);
+    offset += 2;
+
+    // General purpose bit flag
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // Compression method
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File last modification time
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File last modification date
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // CRC-32
+    view.setUint32(offset, crc32(entry.data), true);
+    offset += 4;
+
+    // Compressed size
+    view.setUint32(offset, entry.data.length, true);
+    offset += 4;
+
+    // Uncompressed size
+    view.setUint32(offset, entry.data.length, true);
+    offset += 4;
+
+    // File name length
+    view.setUint16(offset, nameBytes.length, true);
+    offset += 2;
+
+    // Extra field length
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // File comment length
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // Disk number start
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // Internal file attributes
+    view.setUint16(offset, 0, true);
+    offset += 2;
+
+    // External file attributes
+    view.setUint32(offset, 0, true);
+    offset += 4;
+
+    // Relative offset of local header
+    view.setUint32(offset, header.offset, true);
+    offset += 4;
+
+    // File name
+    bytes.set(nameBytes, offset);
+    offset += nameBytes.length;
+  }
+
+  // Write end of central directory record
+  view.setUint32(offset, 0x06054b50, true); // Signature
+  offset += 4;
+  view.setUint16(offset, 0, true); // Number of this disk
+  offset += 2;
+  view.setUint16(offset, 0, true); // Disk where central directory starts
+  offset += 2;
+  view.setUint16(offset, entries.length, true); // Number of central directory records on this disk
+  offset += 2;
+  view.setUint16(offset, entries.length, true); // Total number of central directory records
+  offset += 2;
+  view.setUint32(offset, centralDirSize, true); // Size of central directory
+  offset += 4;
+  view.setUint32(offset, centralDirStart, true); // Offset of start of central directory
+  offset += 4;
+  view.setUint16(offset, 0, true); // Comment length
+  // offset += 2;
+
+  return new Uint8Array(buffer);
+}
+
+// CRC-32 calculation for ZIP
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return crc ^ 0xffffffff;
+}
 
 // Helper to send import completion email
 async function sendImportCompletionEmail(

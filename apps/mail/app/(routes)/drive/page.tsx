@@ -23,6 +23,10 @@ import {
   HardDrive,
   FolderPlus,
   Upload,
+  FilePlus,
+  FileType,
+  Table,
+  Presentation,
   Grid3X3,
   List,
   Star,
@@ -107,6 +111,9 @@ export default function DrivePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [isCreateFileOpen, setIsCreateFileOpen] = useState(false);
+  const [newFileType, setNewFileType] = useState<'document' | 'spreadsheet' | 'presentation'>('document');
+  const [newFileName, setNewFileName] = useState('');
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; type: 'file' | 'folder' } | null>(null);
   // Move functionality - to be implemented
@@ -232,6 +239,7 @@ export default function DrivePage() {
 
   // Mutations
   const createFolderMutation = useMutation(trpc.drive.createFolder.mutationOptions());
+  const createBlankFileMutation = useMutation(trpc.drive.createBlankFile.mutationOptions());
   const renameFolderMutation = useMutation(trpc.drive.renameFolder.mutationOptions());
   const deleteFolderMutation = useMutation(trpc.drive.deleteFolder.mutationOptions());
   const renameFileMutation = useMutation(trpc.drive.renameFile.mutationOptions());
@@ -280,6 +288,37 @@ export default function DrivePage() {
     } catch {
       toast.error('Failed to create folder');
     }
+  };
+
+  const handleCreateBlankFile = async () => {
+    if (!newFileName.trim()) return;
+
+    try {
+      const result = await createBlankFileMutation.mutateAsync({
+        fileType: newFileType,
+        fileName: newFileName.trim(),
+        folderId: currentFolderId,
+      });
+      toast.success('File created');
+      setNewFileName('');
+      setIsCreateFileOpen(false);
+      invalidate();
+      // Navigate to editor
+      navigate(`/drive/edit/${result.fileId}`);
+    } catch {
+      toast.error('Failed to create file');
+    }
+  };
+
+  const openCreateFileDialog = (fileType: 'document' | 'spreadsheet' | 'presentation') => {
+    const defaultNames: Record<typeof fileType, string> = {
+      document: 'Untitled Document',
+      spreadsheet: 'Untitled Spreadsheet',
+      presentation: 'Untitled Presentation',
+    };
+    setNewFileType(fileType);
+    setNewFileName(defaultNames[fileType]);
+    setIsCreateFileOpen(true);
   };
 
   const handleRename = async () => {
@@ -909,6 +948,33 @@ export default function DrivePage() {
                 <DropdownMenuItem onClick={() => handleStartImport('onedrive', true)}>
                   <HardDrive className="mr-2 h-4 w-4" />
                   Import Entire OneDrive
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button>
+                  <FilePlus className="mr-2 h-4 w-4" />
+                  New
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => openCreateFileDialog('document')}>
+                  <FileType className="mr-2 h-4 w-4 text-blue-500" />
+                  Document
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openCreateFileDialog('spreadsheet')}>
+                  <Table className="mr-2 h-4 w-4 text-green-500" />
+                  Spreadsheet
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openCreateFileDialog('presentation')}>
+                  <Presentation className="mr-2 h-4 w-4 text-orange-500" />
+                  Presentation
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setIsCreateFolderOpen(true)}>
+                  <FolderPlus className="mr-2 h-4 w-4" />
+                  Folder
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1578,6 +1644,46 @@ export default function DrivePage() {
             </Button>
             <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
               Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create File Dialog */}
+      <Dialog open={isCreateFileOpen} onOpenChange={setIsCreateFileOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {newFileType === 'document' && <FileType className="h-5 w-5 text-blue-500" />}
+              {newFileType === 'spreadsheet' && <Table className="h-5 w-5 text-green-500" />}
+              {newFileType === 'presentation' && <Presentation className="h-5 w-5 text-orange-500" />}
+              Create New {newFileType === 'document' ? 'Document' : newFileType === 'spreadsheet' ? 'Spreadsheet' : 'Presentation'}
+            </DialogTitle>
+            <DialogDescription>Enter a name for your new file.</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            placeholder="File name"
+            onKeyDown={(e) => e.key === 'Enter' && handleCreateBlankFile()}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateFileOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateBlankFile}
+              disabled={!newFileName.trim() || createBlankFileMutation.isPending}
+            >
+              {createBlankFileMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create & Open'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
