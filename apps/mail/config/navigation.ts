@@ -253,23 +253,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: Tabs,
             shortcut: '?',
           },
-          // {
-          //   title: 'navigation.settings.signatures',
-          //   url: '/settings/signatures',
-          //   icon: MessageSquareIcon,
-          //   disabled: true,
-          // },
-          // {
-          //   title: 'navigation.settings.shortcuts',
-          //   url: '/settings/shortcuts',
-          //   icon: Tabs,
-          //   disabled: true,
-          // },
-          // {
-          //   title: "Notifications",
-          //   url: "/settings/notifications",
-          //   icon: BellIcon,
-          // },
+          {
+            title: m['navigation.settings.notifications'](),
+            url: '/settings/notifications',
+            icon: Bell,
+          },
           {
             title: m['navigation.settings.deleteAccount'](),
             url: '/settings/danger-zone',
