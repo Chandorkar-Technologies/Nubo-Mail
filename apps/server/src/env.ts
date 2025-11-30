@@ -118,6 +118,9 @@ export type ZeroEnv = {
   // Web Push VAPID keys
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
+  // SMTP Service for IMAP email sending (external Node.js service)
+  SMTP_SERVICE_URL?: string;
+  SMTP_SERVICE_API_KEY?: string;
 };
 
 const env = _env as ZeroEnv;

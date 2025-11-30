@@ -6,7 +6,6 @@ import { env } from '../../env';
 import { createDb } from '../../db';
 import { email } from '../../db/schema';
 import { eq, and, desc, like } from 'drizzle-orm';
-import { WorkerMailer } from 'worker-mailer';
 
 export class ImapMailManager implements MailManager {
     private db: ReturnType<typeof createDb>['db'];
@@ -246,46 +245,73 @@ export class ImapMailManager implements MailManager {
         const { smtp, auth } = imapConfig;
         const fromEmail = data.fromEmail || this.config.auth.email || auth.user;
 
-        try {
-            // Use worker-mailer which works with Cloudflare Workers via cloudflare:sockets
-            const mailer = await WorkerMailer.connect({
-                credentials: {
-                    username: auth.user,
-                    password: auth.pass,
-                },
-                authType: 'plain',
-                host: smtp.host,
-                port: smtp.port,
-                secure: smtp.secure,
-            });
+        // Get SMTP service configuration from environment
+        const smtpServiceUrl = env.SMTP_SERVICE_URL;
+        const smtpServiceApiKey = env.SMTP_SERVICE_API_KEY;
 
-            // Prepare attachments for worker-mailer format
+        if (!smtpServiceUrl || !smtpServiceApiKey) {
+            throw new Error('SMTP service not configured. Please set SMTP_SERVICE_URL and SMTP_SERVICE_API_KEY environment variables.');
+        }
+
+        console.log(`[IMAP Driver] Sending email via SMTP service to ${smtpServiceUrl}`);
+        console.log(`[IMAP Driver] SMTP config: ${smtp.host}:${smtp.port} (secure: ${smtp.secure})`);
+
+        try {
+            // Prepare attachments as base64
             const attachments = data.attachments.map(att => ({
                 filename: att.name,
-                content: att.base64, // worker-mailer accepts base64 directly
-                mimeType: att.contentType || 'application/octet-stream',
+                content: att.base64, // Already base64 encoded
+                contentType: att.type || 'application/octet-stream',
             }));
 
-            // Send the email
-            await mailer.send({
-                from: { email: fromEmail },
-                to: data.to.map(t => ({ email: t.email, name: t.name })),
-                cc: data.cc?.map(t => ({ email: t.email, name: t.name })),
-                bcc: data.bcc?.map(t => ({ email: t.email, name: t.name })),
-                subject: data.subject,
-                html: data.message,
-                attachments: attachments.length > 0 ? attachments : undefined,
+            // Call the SMTP service HTTP endpoint
+            const response = await fetch(`${smtpServiceUrl}/send`, {
+                method: 'POST',
                 headers: {
-                    ...data.headers,
-                    ...(data.originalMessage ? { 'In-Reply-To': data.originalMessage } : {}),
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${smtpServiceApiKey}`,
                 },
+                body: JSON.stringify({
+                    smtp: {
+                        host: smtp.host,
+                        port: smtp.port,
+                        secure: smtp.secure,
+                        auth: {
+                            user: auth.user,
+                            pass: auth.pass,
+                        },
+                    },
+                    email: {
+                        from: fromEmail,
+                        to: data.to.map(t => t.email),
+                        cc: data.cc?.map(t => t.email),
+                        bcc: data.bcc?.map(t => t.email),
+                        subject: data.subject,
+                        html: data.message,
+                        inReplyTo: data.originalMessage,
+                        references: data.headers?.References,
+                        attachments: attachments.length > 0 ? attachments : undefined,
+                    },
+                    apiKey: smtpServiceApiKey, // Also in body for additional validation
+                }),
             });
 
-            const messageId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}@nubo.email`;
-            console.log(`[IMAP Driver] Email sent via SMTP: ${messageId}`);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ message: 'Unknown error' })) as { message?: string };
+                throw new Error(`SMTP service error: ${errorData.message || response.statusText}`);
+            }
+
+            const result = await response.json() as { success: boolean; messageId?: string; error?: string };
+
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to send email');
+            }
+
+            const messageId = result.messageId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}@nubo.email`;
+            console.log(`[IMAP Driver] Email sent via SMTP service: ${messageId}`);
             return { id: messageId };
         } catch (error) {
-            console.error('[IMAP Driver] Failed to send email via SMTP:', error);
+            console.error('[IMAP Driver] Failed to send email via SMTP service:', error);
             throw new Error(`Failed to send email via SMTP: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
