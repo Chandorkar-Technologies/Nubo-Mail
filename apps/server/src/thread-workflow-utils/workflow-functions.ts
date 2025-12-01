@@ -25,7 +25,7 @@ import { getPrompt, getEmbeddingVector } from '../pipelines.effect';
 import { messageToXML, threadToXML } from './workflow-utils';
 import type { WorkflowContext } from './workflow-engine';
 import { sendPushToUser } from '../lib/web-push';
-import { bulkDeleteKeys } from '../lib/bulk-delete';
+// bulkDeleteKeys is lazy-loaded to avoid bundling the massive cloudflare SDK at startup
 import { pushSubscription, connection } from '../db/schema';
 import { getPromptName } from '../pipelines';
 import { env } from 'cloudflare:workers';
@@ -315,6 +315,8 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
 
   cleanupWorkflowExecution: async (context) => {
     const workflowKey = `workflow_${context.threadId}`;
+    // Lazy import to avoid bundling the massive cloudflare SDK at startup
+    const { bulkDeleteKeys } = await import('../lib/bulk-delete');
     const result = await bulkDeleteKeys([workflowKey]);
     console.log(
       '[WORKFLOW_FUNCTIONS] Cleaned up workflow execution tracking for thread:',

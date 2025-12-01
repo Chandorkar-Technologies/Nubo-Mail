@@ -1,5 +1,4 @@
 import { env } from 'cloudflare:workers';
-import Cloudflare from 'cloudflare';
 
 // KV namespace IDs for different environments
 const KV_NAMESPACE_IDS = {
@@ -42,6 +41,8 @@ export const bulkDeleteKeys = async (
   }
 
   try {
+    // Lazy import to avoid loading the massive cloudflare SDK at startup
+    const { default: Cloudflare } = await import('cloudflare');
     const cloudflareClient = new Cloudflare({
       apiToken: env.CLOUDFLARE_API_TOKEN || '',
     });
