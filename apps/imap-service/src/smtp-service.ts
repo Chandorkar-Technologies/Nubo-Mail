@@ -17,16 +17,21 @@ export class SmtpService {
 
         const config = connection.config;
 
+        // Log the raw config structure to debug
+        this.logger.info(`[SMTP] Raw config structure: ${JSON.stringify(config, null, 2)}`);
+
         // IMAP connections can store SMTP config in different formats:
         // 1. Nested: config.smtp.host, config.smtp.port, config.smtp.secure
         // 2. Flat prefixed: config.smtpHost, config.smtpPort, config.smtpSecure
         // Auth is stored under config.auth
         const smtpHost = config.smtp?.host || config.smtpHost;
         const smtpPort = config.smtp?.port || config.smtpPort;
-        const smtpSecure = config.smtp?.secure ?? config.smtpSecure;
+        // Ensure secure is a boolean - handle string "true"/"false" from DB
+        const rawSecure = config.smtp?.secure ?? config.smtpSecure;
+        const smtpSecure = rawSecure === true || rawSecure === 'true';
         const authConfig = config.auth;
 
-        this.logger.info(`[SMTP] Using SMTP config: host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure}`);
+        this.logger.info(`[SMTP] Using SMTP config: host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure} (raw: ${rawSecure}, type: ${typeof rawSecure})`);
 
         if (!smtpHost || !authConfig) {
             this.logger.error(`[SMTP] Invalid config structure:`, {
