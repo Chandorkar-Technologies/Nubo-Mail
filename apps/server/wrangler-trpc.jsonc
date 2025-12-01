@@ -159,7 +159,8 @@
     "OTEL_SERVICE_NAME": "zero-email-server-production",
     "DD_API_KEY": "",
     "DD_APP_KEY": "",
-    "DD_SITE": "datadoghq.com"
+    "DD_SITE": "datadoghq.com",
+    "VAPID_PUBLIC_KEY": "BIUyPfKlTwnJ1INqE01zWA_1-lUHRvFvDRP0mRG4EkKIzq1JSgvJ70eur8UMEKPCI5nSEo5PBiOc9VMsYApXS9A"
   },
   "kv_namespaces": [
     {
