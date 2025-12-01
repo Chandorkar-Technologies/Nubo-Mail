@@ -17,26 +17,32 @@ export class SmtpService {
 
         const config = connection.config;
 
-        // IMAP connections store SMTP config under config.smtp and auth under config.auth
-        const smtpConfig = config.smtp || config;
-        const authConfig = config.auth || smtpConfig.auth;
+        // IMAP connections can store SMTP config in different formats:
+        // 1. Nested: config.smtp.host, config.smtp.port, config.smtp.secure
+        // 2. Flat prefixed: config.smtpHost, config.smtpPort, config.smtpSecure
+        // Auth is stored under config.auth
+        const smtpHost = config.smtp?.host || config.smtpHost;
+        const smtpPort = config.smtp?.port || config.smtpPort;
+        const smtpSecure = config.smtp?.secure ?? config.smtpSecure;
+        const authConfig = config.auth;
 
-        this.logger.info(`[SMTP] Using SMTP config: host=${smtpConfig.host}, port=${smtpConfig.port}, secure=${smtpConfig.secure}`);
+        this.logger.info(`[SMTP] Using SMTP config: host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure}`);
 
-        if (!smtpConfig || !smtpConfig.host || !authConfig) {
+        if (!smtpHost || !authConfig) {
             this.logger.error(`[SMTP] Invalid config structure:`, {
                 hasSmtp: !!config.smtp,
+                hasSmtpHost: !!config.smtpHost,
                 hasAuth: !!config.auth,
-                hasHost: !!smtpConfig?.host
+                smtpHost,
             });
             throw new Error(`Invalid SMTP configuration for connection ${connection.id}`);
         }
 
         // Create reusable transporter object using the default SMTP transport
         const transporter = nodemailer.createTransport({
-            host: smtpConfig.host,
-            port: smtpConfig.port,
-            secure: smtpConfig.secure, // true for 465, false for other ports
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpSecure, // true for 465, false for other ports
             auth: {
                 user: authConfig.user,
                 pass: authConfig.pass,
