@@ -26,12 +26,15 @@ export class SmtpService {
         // Auth is stored under config.auth
         const smtpHost = config.smtp?.host || config.smtpHost;
         const smtpPort = config.smtp?.port || config.smtpPort;
-        // Ensure secure is a boolean - handle string "true"/"false" from DB
-        const rawSecure = config.smtp?.secure ?? config.smtpSecure;
-        const smtpSecure = rawSecure === true || rawSecure === 'true';
         const authConfig = config.auth;
 
-        this.logger.info(`[SMTP] Using SMTP config: host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure} (raw: ${rawSecure}, type: ${typeof rawSecure})`);
+        // Determine secure setting based on port:
+        // - Port 465: implicit TLS (secure: true)
+        // - Port 587/25: STARTTLS (secure: false, Nodemailer upgrades automatically)
+        // Override any stored value since the port determines the protocol
+        const smtpSecure = smtpPort === 465;
+
+        this.logger.info(`[SMTP] Using SMTP config: host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure} (auto-detected from port)`);
 
         if (!smtpHost || !authConfig) {
             this.logger.error(`[SMTP] Invalid config structure:`, {
