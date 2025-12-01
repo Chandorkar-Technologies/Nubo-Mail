@@ -215,12 +215,17 @@ export function ThreadDisplay() {
 
   const animationsEnabled = useAnimations();
 
-  // Collect all attachments from all messages in the thread
+  // Collect all attachments from all messages in the thread with messageId for on-demand fetching
   const allThreadAttachments = useMemo(() => {
     if (!emailData?.messages) return [];
     return emailData.messages.reduce<Attachment[]>((acc, message) => {
       if (message.attachments && message.attachments.length > 0) {
-        acc.push(...message.attachments);
+        // Add messageId to each attachment for on-demand fetching from Gmail/Outlook
+        const attachmentsWithMessageId = message.attachments.map((att) => ({
+          ...att,
+          messageId: message.id,
+        }));
+        acc.push(...attachmentsWithMessageId);
       }
       return acc;
     }, []);

@@ -43,7 +43,7 @@ import { EmailVerificationBadge } from './email-verification-badge';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useAttachments } from '@/hooks/use-attachments';
-import { useTRPC } from '@/providers/query-provider';
+import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Markdown } from '@react-email/components';
@@ -258,30 +258,72 @@ const cleanNameDisplay = (name?: string) => {
 };
 
 const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const trpcClient = useTRPCClient();
+
   if (!attachments || attachments.length === 0) return null;
+
+  const downloadFromBase64 = (attachment: Attachment) => {
+    const byteCharacters = atob(attachment.body);
+    const byteNumbers: number[] = Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: attachment.mimeType });
+
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachment.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
 
   const handleDownload = async (attachment: Attachment) => {
     try {
-      // Convert base64 to blob
-      const byteCharacters = atob(attachment.body);
-      const byteNumbers: number[] = Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      // If body is already present (IMAP), use it directly
+      if (attachment.body && attachment.body.length > 0) {
+        downloadFromBase64(attachment);
+        return;
       }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: attachment.mimeType });
 
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = attachment.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      // For OAuth (Gmail/Outlook), fetch on-demand using messageId
+      if (!attachment.messageId) {
+        console.error('Missing messageId for attachment fetch');
+        return;
+      }
+
+      setDownloadingId(attachment.attachmentId);
+
+      // Fetch attachments for the message using the tRPC client directly
+      const fetchedAttachments = await trpcClient.mail.getMessageAttachments.query({
+        messageId: attachment.messageId,
+      });
+
+      // Find the matching attachment by ID
+      const fetchedAttachment = fetchedAttachments.find(
+        (a: { attachmentId: string }) => a.attachmentId === attachment.attachmentId,
+      );
+
+      if (!fetchedAttachment || !fetchedAttachment.body) {
+        console.error('Could not fetch attachment body');
+        setDownloadingId(null);
+        return;
+      }
+
+      // Download using the fetched body
+      downloadFromBase64({
+        ...attachment,
+        body: fetchedAttachment.body,
+      });
+
+      setDownloadingId(null);
     } catch (error) {
       console.error('Error downloading attachment:', error);
+      setDownloadingId(null);
     }
   };
 
@@ -297,9 +339,14 @@ const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
           <button
             key={`${attachment.attachmentId}-${attachment.filename}`}
             onClick={() => handleDownload(attachment)}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-[#F0F0F0] dark:bg-[#262626] dark:hover:bg-[#303030]"
+            disabled={downloadingId === attachment.attachmentId}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-[#F0F0F0] disabled:cursor-wait disabled:opacity-50 dark:bg-[#262626] dark:hover:bg-[#303030]"
           >
-            <span className="text-muted-foreground">{getFileIcon(attachment.filename)}</span>
+            {downloadingId === attachment.attachmentId ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (
+              <span className="text-muted-foreground">{getFileIcon(attachment.filename)}</span>
+            )}
             <span className="max-w-[200px] truncate" title={attachment.filename}>
               {attachment.filename}
             </span>
