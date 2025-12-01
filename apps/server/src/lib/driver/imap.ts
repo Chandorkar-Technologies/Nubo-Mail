@@ -237,15 +237,59 @@ export class ImapMailManager implements MailManager {
     public async getMessageAttachments(_id: string) { return []; }
     public async create(data: IOutgoingMessage): Promise<{ id: string }> {
         const imapConfig = this.config.imapConfig;
+        const connectionId = this.config.connectionId;
 
         // Check if we have SMTP configuration
         if (!imapConfig?.smtp || !imapConfig?.auth) {
             throw new Error('SMTP configuration not found for this IMAP connection. Please reconfigure your email account with SMTP settings.');
         }
 
-        const { smtp, auth } = imapConfig;
+        const { auth } = imapConfig;
         const fromEmail = data.fromEmail || this.config.auth.email || auth.user;
 
+        // Check if we should use the IMAP service for SMTP sending
+        const imapServiceUrl = env.IMAP_SERVICE_URL;
+        const imapServiceApiKey = env.IMAP_SERVICE_API_KEY;
+
+        if (imapServiceUrl && imapServiceApiKey) {
+            // Use the IMAP service HTTP endpoint for SMTP sending
+            console.log(`[IMAP Driver] Sending email via IMAP service: ${imapServiceUrl}`);
+
+            try {
+                const response = await fetch(`${imapServiceUrl}/send`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${imapServiceApiKey}`,
+                    },
+                    body: JSON.stringify({
+                        connectionId,
+                        from: fromEmail,
+                        to: data.to.map(t => t.email),
+                        cc: data.cc?.map(t => t.email),
+                        bcc: data.bcc?.map(t => t.email),
+                        subject: data.subject,
+                        html: data.message,
+                        text: data.message?.replace(/<[^>]*>/g, ''), // Strip HTML for text version
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                    throw new Error((errorData as { error?: string }).error || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json() as { messageId?: string };
+                console.log(`[IMAP Driver] Email sent via IMAP service: ${result.messageId}`);
+                return { id: result.messageId || `${Date.now()}@nubo.email` };
+            } catch (error) {
+                console.error('[IMAP Driver] Failed to send email via IMAP service:', error);
+                throw new Error(`Failed to send email via IMAP service: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+
+        // Fallback to worker-mailer (direct SMTP from Cloudflare Worker)
+        const { smtp } = imapConfig;
         try {
             // Use worker-mailer which works with Cloudflare Workers via cloudflare:sockets
             const mailer = await WorkerMailer.connect({
