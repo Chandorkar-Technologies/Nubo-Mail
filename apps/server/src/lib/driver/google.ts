@@ -94,6 +94,14 @@ export class GoogleMailManager implements MailManager {
 
         const attachmentData = response.data.data || '';
 
+        if (!attachmentData) {
+          console.warn('[GoogleDriver] getAttachment: No attachment data returned', {
+            messageId,
+            attachmentId,
+            responseSize: response.data.size,
+          });
+        }
+
         const base64 = fromBase64Url(attachmentData);
 
         return base64;
