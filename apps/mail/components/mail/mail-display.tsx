@@ -160,7 +160,7 @@ type Props = {
   onReply?: () => void;
   onReplyAll?: () => void;
   onForward?: () => void;
-  threadAttachments?: Attachment[];
+  threadAttachments?: (Attachment & { messageId: string })[];
 };
 
 const MailDisplayLabels = ({ labels }: { labels: string[] }) => {
@@ -257,72 +257,59 @@ const cleanNameDisplay = (name?: string) => {
   return name.trim();
 };
 
-const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
+const ThreadAttachments = ({ attachments }: { attachments: (Attachment & { messageId: string })[] }) => {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const trpcClient = useTRPCClient();
 
   if (!attachments || attachments.length === 0) return null;
 
-  const downloadFromBase64 = (attachment: Attachment) => {
-    const byteCharacters = atob(attachment.body);
-    const byteNumbers: number[] = Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: attachment.mimeType });
-
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = attachment.filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  };
-
-  const handleDownload = async (attachment: Attachment) => {
+  const handleDownload = async (attachment: Attachment & { messageId: string }) => {
     try {
-      // If body is already present (IMAP), use it directly
-      if (attachment.body && attachment.body.length > 0) {
-        downloadFromBase64(attachment);
-        return;
-      }
-
-      // For OAuth (Gmail/Outlook), fetch on-demand using messageId
-      if (!attachment.messageId) {
-        console.error('Missing messageId for attachment fetch');
-        return;
-      }
-
       setDownloadingId(attachment.attachmentId);
 
-      // Fetch attachments for the message using the tRPC client directly
-      const fetchedAttachments = await trpcClient.mail.getMessageAttachments.query({
+      // Fetch the attachment data with body from the API
+      const messageAttachments = await trpcClient.mail.getMessageAttachments.query({
         messageId: attachment.messageId,
       });
 
-      // Find the matching attachment by ID
-      const fetchedAttachment = fetchedAttachments.find(
-        (a: { attachmentId: string }) => a.attachmentId === attachment.attachmentId,
+      // Find the specific attachment by ID first, then fallback to filename match
+      let fullAttachment = messageAttachments?.find(
+        (att: Attachment) => att.attachmentId === attachment.attachmentId
       );
 
-      if (!fetchedAttachment || !fetchedAttachment.body) {
-        console.error('Could not fetch attachment body');
-        setDownloadingId(null);
-        return;
+      // Fallback: match by filename if ID doesn't match
+      if (!fullAttachment?.body) {
+        fullAttachment = messageAttachments?.find(
+          (att: Attachment) => att.filename === attachment.filename
+        );
       }
 
-      // Download using the fetched body
-      downloadFromBase64({
-        ...attachment,
-        body: fetchedAttachment.body,
-      });
+      if (!fullAttachment?.body) {
+        throw new Error('Attachment data not found');
+      }
 
-      setDownloadingId(null);
+      // Convert base64 to blob
+      const byteCharacters = atob(fullAttachment.body);
+      const byteNumbers: number[] = Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: attachment.mimeType });
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading attachment:', error);
+      toast.error('Failed to download attachment');
+    } finally {
       setDownloadingId(null);
     }
   };
@@ -340,10 +327,10 @@ const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
             key={`${attachment.attachmentId}-${attachment.filename}`}
             onClick={() => handleDownload(attachment)}
             disabled={downloadingId === attachment.attachmentId}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-[#F0F0F0] disabled:cursor-wait disabled:opacity-50 dark:bg-[#262626] dark:hover:bg-[#303030]"
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-[#F0F0F0] dark:bg-[#262626] dark:hover:bg-[#303030] disabled:opacity-50"
           >
             {downloadingId === attachment.attachmentId ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <span className="text-muted-foreground">{getFileIcon(attachment.filename)}</span>
             )}
