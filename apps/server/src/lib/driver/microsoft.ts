@@ -25,6 +25,12 @@ export class OutlookMailManager implements MailManager {
 
   constructor(public config: ManagerConfig) {
     const getAccessToken = async () => {
+      // If accessToken is provided directly in config, use it (e.g., during OAuth callback)
+      if (config.auth.accessToken) {
+        return config.auth.accessToken;
+      }
+
+      // Otherwise, fetch from Better Auth API (normal operation)
       const c = getContext<HonoContext>();
       const data = await c.var.auth.api.getAccessToken({
         body: {
