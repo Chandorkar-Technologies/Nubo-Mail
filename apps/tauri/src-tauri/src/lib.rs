@@ -4,8 +4,9 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // Create main window pointing to nubo.email
-            let url = WebviewUrl::External("https://nubo.email".parse().unwrap());
+            // Create main window pointing to nubo.email inbox (the launcher)
+            // Desktop/mobile apps should open the main mail interface, not login page
+            let url = WebviewUrl::External("https://nubo.email/mail/inbox".parse().unwrap());
 
             let window = WebviewWindowBuilder::new(app, "main", url)
                 .title("Nubo")
