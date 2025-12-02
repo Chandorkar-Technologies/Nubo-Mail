@@ -67,3 +67,4 @@ tools.json
 # local development SQL scripts
 activate-premium-local.sql
 diagnose-imap.sqlapps/tauri/src-tauri/target/
+apps/tauri/src-tauri/target/
