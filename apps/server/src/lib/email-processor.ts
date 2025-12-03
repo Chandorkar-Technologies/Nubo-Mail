@@ -162,8 +162,9 @@ export function applyEmailPreferences(
   const html = $.html();
 
   // Apply theme-specific styles
-  // In dark mode, we need to handle emails that have inline black text color
-  // by ensuring minimum contrast with !important overrides
+  // We need to handle emails that have inline styles that may conflict with the theme
+  // In light mode: force black text to prevent white-on-white from Gmail dark mode emails
+  // In dark mode: force light text to prevent black-on-black
   const themeStyles = `
     <style type="text/css">
       :host {
@@ -180,15 +181,35 @@ export function applyEmailPreferences(
       body {
         margin: 0;
         padding: 0;
-        color: ${isDarkTheme ? '#e5e5e5' : '#000000'};
+        background-color: ${isDarkTheme ? '#1A1A1A' : '#ffffff'} !important;
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'} !important;
       }
 
-      /* Force readable text colors in dark mode */
+      /* Force readable text colors - applies to both light and dark modes */
+      /* This prevents Gmail dark mode emails from showing white text in light mode */
+      /* and prevents light mode emails from showing black text in dark mode */
+      p, span, div, td, th, li, dd, dt, h1, h2, h3, h4, h5, h6, font, b, strong, i, em, u, label {
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'} !important;
+      }
+
+      /* Handle white/light text that would be invisible in light mode */
+      ${!isDarkTheme ? `
+      /* Reset white/light backgrounds that would clash with white app background */
+      [style*="background-color: #fff"],
+      [style*="background-color:#fff"],
+      [style*="background-color: white"],
+      [style*="background-color:white"],
+      [style*="background: #fff"],
+      [style*="background:#fff"],
+      [bgcolor="#ffffff"],
+      [bgcolor="white"] {
+        background-color: transparent !important;
+        background: transparent !important;
+      }
+      ` : ''}
+
+      /* Handle dark backgrounds in dark mode */
       ${isDarkTheme ? `
-      p, span, div, td, th, li, dd, dt, h1, h2, h3, h4, h5, h6, font, b, strong, i, em, u {
-        color: inherit !important;
-      }
-
       /* Reset dark/black backgrounds to transparent in dark mode */
       [style*="background-color: #000"],
       [style*="background-color:#000"],
@@ -209,6 +230,7 @@ export function applyEmailPreferences(
 
       table {
         border-collapse: collapse;
+        background-color: transparent !important;
       }
 
       ::selection {
@@ -225,7 +247,7 @@ export function applyEmailPreferences(
 
       details.quoted-toggle summary {
         cursor: pointer;
-        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
+        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'} !important;
         list-style: none;
         user-select: none;
       }
@@ -235,14 +257,14 @@ export function applyEmailPreferences(
       }
 
       [data-theme-color="muted"] {
-        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
+        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'} !important;
       }
 
       /* Ensure plain text emails are readable */
       pre, code {
         white-space: pre-wrap;
         word-wrap: break-word;
-        color: ${isDarkTheme ? '#e5e5e5' : '#000000'};
+        color: ${isDarkTheme ? '#e5e5e5' : '#000000'} !important;
       }
     </style>
   `;

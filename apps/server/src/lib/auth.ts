@@ -105,6 +105,18 @@ const generateUsername = (email: string): string => {
 };
 
 const connectionHandlerHook = async (account: Account) => {
+  console.log('[connectionHandlerHook] START - Received account:', {
+    id: account.id,
+    accountId: account.accountId,
+    providerId: account.providerId,
+    userId: account.userId,
+    hasAccessToken: !!account.accessToken,
+    hasRefreshToken: !!account.refreshToken,
+    accessTokenLength: account.accessToken?.length,
+    refreshTokenLength: account.refreshToken?.length,
+    accessTokenExpiresAt: account.accessTokenExpiresAt,
+  });
+
   // Skip credential-based accounts (email/password sign-up)
   // Only process OAuth social provider accounts
   if (account.providerId === 'credential') {
@@ -159,12 +171,27 @@ const connectionHandlerHook = async (account: Account) => {
     expiresAt: new Date(Date.now() + (account.accessTokenExpiresAt?.getTime() || 3600000)),
   };
 
+  console.log('[connectionHandlerHook] Creating connection:', {
+    providerId: account.providerId,
+    email: userInfo.address,
+    userId: account.userId,
+    hasAccessToken: !!updatingInfo.accessToken,
+    hasRefreshToken: !!updatingInfo.refreshToken,
+    accessTokenLength: updatingInfo.accessToken?.length,
+    refreshTokenLength: updatingInfo.refreshToken?.length,
+  });
+
   const db = await getZeroDB(account.userId);
   const [result] = await db.createConnection(
     account.providerId as EProviders,
     userInfo.address,
     updatingInfo,
   );
+
+  console.log('[connectionHandlerHook] Connection created:', {
+    connectionId: result?.id,
+    providerId: account.providerId,
+  });
 
   // Disabled: React email components use @react-email/render which uses 'cache' in fetch
   // CF Workers doesn't support 'cache' field. Re-enable when emails are pre-rendered.
@@ -225,10 +252,24 @@ export const createAuth = () => {
             to: data.user.email,
             subject: 'Delete your Nubo account',
             html: `
-            <h2>Delete Your Nubo Account</h2>
-            <p>Click the link below to delete your account:</p>
-            <a href="${verificationUrl}">${verificationUrl}</a>
-          `,
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta name="color-scheme" content="light only">
+                <meta name="supported-color-schemes" content="light only">
+              </head>
+              <body style="background-color: #ffffff; margin: 0; padding: 0;">
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px;">
+                  <h2 style="color: #333333;">Delete Your Nubo Account</h2>
+                  <p style="color: #333333;">Click the button below to delete your account:</p>
+                  <a href="${verificationUrl}" style="display: inline-block; background-color: #dc2626; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Delete Account</a>
+                  <p style="color: #666666; font-size: 14px;">Or copy this link: <a href="${verificationUrl}" style="color: #0066cc;">${verificationUrl}</a></p>
+                  <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
+                  <p style="color: #999999; font-size: 12px;">If you didn't request this, you can safely ignore this email.</p>
+                </div>
+              </body>
+              </html>
+            `,
           });
         },
         beforeDelete: async (user, request) => {
@@ -301,15 +342,24 @@ export const createAuth = () => {
           to: user.email,
           subject: 'Reset your Nubo password',
           html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #333;">Reset Your Password</h2>
-              <p>You requested to reset your password. Click the button below to set a new password:</p>
-              <a href="${url}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Reset Password</a>
-              <p style="color: #666; font-size: 14px;">Or copy this link: <a href="${url}">${url}</a></p>
-              <p style="color: #666; font-size: 14px;">If you didn't request this, you can safely ignore this email.</p>
-              <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
-              <p style="color: #999; font-size: 12px;">This link will expire in 1 hour.</p>
-            </div>
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta name="color-scheme" content="light only">
+              <meta name="supported-color-schemes" content="light only">
+            </head>
+            <body style="background-color: #ffffff; margin: 0; padding: 0;">
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px;">
+                <h2 style="color: #333333;">Reset Your Password</h2>
+                <p style="color: #333333;">You requested to reset your password. Click the button below to set a new password:</p>
+                <a href="${url}" style="display: inline-block; background-color: #000000; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Reset Password</a>
+                <p style="color: #666666; font-size: 14px;">Or copy this link: <a href="${url}" style="color: #0066cc;">${url}</a></p>
+                <p style="color: #666666; font-size: 14px;">If you didn't request this, you can safely ignore this email.</p>
+                <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
+                <p style="color: #999999; font-size: 12px;">This link will expire in 1 hour.</p>
+              </div>
+            </body>
+            </html>
           `,
         });
       },
@@ -318,21 +368,30 @@ export const createAuth = () => {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, token }) => {
-        const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
+        const verificationUrl = `${env.VITE_PUBLIC_BACKEND_URL}/api/auth/verify-email?token=${token}&callbackURL=${env.VITE_PUBLIC_APP_URL}/settings/connections`;
 
         await resend().emails.send({
           from: 'Nubo <no-reply@nubo.email>',
           to: user.email,
           subject: 'Verify your Nubo account',
           html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #333;">Welcome to Nubo!</h2>
-              <p>Please verify your email address to complete your registration:</p>
-              <a href="${verificationUrl}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Verify Email</a>
-              <p style="color: #666; font-size: 14px;">Or copy this link: <a href="${verificationUrl}">${verificationUrl}</a></p>
-              <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
-              <p style="color: #999; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
-            </div>
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta name="color-scheme" content="light only">
+              <meta name="supported-color-schemes" content="light only">
+            </head>
+            <body style="background-color: #ffffff; margin: 0; padding: 0;">
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px;">
+                <h2 style="color: #333333;">Welcome to Nubo!</h2>
+                <p style="color: #333333;">Please verify your email address to complete your registration:</p>
+                <a href="${verificationUrl}" style="display: inline-block; background-color: #000000; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">Verify Email</a>
+                <p style="color: #666666; font-size: 14px;">Or copy this link: <a href="${verificationUrl}" style="color: #0066cc;">${verificationUrl}</a></p>
+                <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
+                <p style="color: #999999; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
+              </div>
+            </body>
+            </html>
           `,
         });
       },
