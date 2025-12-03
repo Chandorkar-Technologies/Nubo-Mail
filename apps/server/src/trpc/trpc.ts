@@ -123,6 +123,12 @@ export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx,
     // Handle token expiration/refresh issues
     if (errorMessage.includes('invalid_grant')) {
       // Remove the access token and refresh token
+      console.log('[activeDriverProcedure] INVALID_GRANT detected - clearing tokens for connection:', {
+        connectionId: activeConnection.id,
+        email: activeConnection.email,
+        providerId: activeConnection.providerId,
+        originalError: errorMessage,
+      });
       const db = await getZeroDB(sessionUser.id);
       await db.updateConnection(activeConnection.id, {
         accessToken: null,

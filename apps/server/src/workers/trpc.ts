@@ -688,7 +688,18 @@ class ZeroDB extends DurableObject<ZeroEnv> {
       picture?: string;
     },
   ): Promise<{ id: string }[]> {
-    return await this.db
+    console.log('[ZeroDB.createConnection] Called with:', {
+      providerId,
+      email,
+      userId,
+      hasAccessToken: !!updatingInfo.accessToken,
+      hasRefreshToken: !!updatingInfo.refreshToken,
+      accessTokenLength: updatingInfo.accessToken?.length,
+      refreshTokenLength: updatingInfo.refreshToken?.length,
+      scope: updatingInfo.scope,
+    });
+
+    const result = await this.db
       .insert(connection)
       .values({
         ...updatingInfo,
@@ -707,6 +718,14 @@ class ZeroDB extends DurableObject<ZeroEnv> {
         },
       })
       .returning({ id: connection.id });
+
+    console.log('[ZeroDB.createConnection] Result:', {
+      connectionId: result[0]?.id,
+      providerId,
+      email,
+    });
+
+    return result;
   }
 
   async findConnectionById(
@@ -780,6 +799,12 @@ class ZeroDB extends DurableObject<ZeroEnv> {
     connectionId: string,
     updatingInfo: Partial<typeof connection.$inferInsert>,
   ) {
+    console.log('[ZeroDB.updateConnection] Called with:', {
+      connectionId,
+      hasAccessToken: updatingInfo.accessToken !== undefined ? (updatingInfo.accessToken ? 'token present' : 'null/clearing') : 'not in update',
+      hasRefreshToken: updatingInfo.refreshToken !== undefined ? (updatingInfo.refreshToken ? 'token present' : 'null/clearing') : 'not in update',
+      keys: Object.keys(updatingInfo),
+    });
     return await this.db
       .update(connection)
       .set(updatingInfo)

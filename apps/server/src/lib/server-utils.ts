@@ -736,6 +736,8 @@ export const verifyToken = async (token: string) => {
 
 
 export const resetConnection = async (connectionId: string) => {
+  console.log('[resetConnection] CLEARING TOKENS for connectionId:', connectionId);
+  console.trace('[resetConnection] Stack trace:');
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
   await db
     .update(connection)

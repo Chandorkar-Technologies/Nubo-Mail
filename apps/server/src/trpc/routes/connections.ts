@@ -19,9 +19,22 @@ export const connectionsRouter = router({
       const db = await getZeroDB(sessionUser.id);
       const connections = await db.findManyConnections();
 
+      // Debug logging
+      console.log('[connections.list] Found connections:', connections.map(c => ({
+        id: c.id,
+        email: c.email,
+        providerId: c.providerId,
+        hasAccessToken: !!c.accessToken,
+        hasRefreshToken: !!c.refreshToken,
+        accessTokenLength: c.accessToken?.length,
+        refreshTokenLength: c.refreshToken?.length,
+      })));
+
       const disconnectedIds = connections
         .filter((c) => c.providerId !== 'imap' && (!c.accessToken || !c.refreshToken))
         .map((c) => c.id);
+
+      console.log('[connections.list] Disconnected IDs:', disconnectedIds);
 
       return {
         connections: connections.map((connection) => {
