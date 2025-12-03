@@ -140,11 +140,36 @@ const connectionHandlerHook = async (account: Account) => {
   });
 
   const userInfo = await driver.getUserInfo().catch(async (error) => {
-    console.error('getUserInfo failed for provider:', account.providerId, 'Error:', error?.message || error);
-    if (account.accessToken) {
+    console.error('[connectionHandlerHook] getUserInfo failed:', {
+      providerId: account.providerId,
+      accountId: account.id,
+      userId: account.userId,
+      error: error?.message || error,
+      errorCode: error?.code,
+      errorStatus: error?.statusCode || error?.status,
+      stack: error?.stack,
+    });
+
+    // For Microsoft, common failures include:
+    // - invalid_grant: token expired or revoked
+    // - insufficient_scope: missing required permissions
+    // - invalid_client: app configuration issue
+    // Don't immediately clear tokens - let the user retry or see a proper error
+    // Only revoke if we're certain the tokens are invalid (not just a temporary API failure)
+    const isDefinitelyInvalidToken =
+      error?.message?.toLowerCase()?.includes('invalid_grant') ||
+      error?.message?.toLowerCase()?.includes('invalid_client') ||
+      error?.statusCode === 401 ||
+      error?.status === 401;
+
+    if (isDefinitelyInvalidToken && account.accessToken) {
+      console.log('[connectionHandlerHook] Token is definitely invalid, revoking...');
       await driver.revokeToken(account.accessToken).catch((e) => console.error('revokeToken failed:', e));
       await resetConnection(account.id).catch((e) => console.error('resetConnection failed:', e));
+    } else {
+      console.log('[connectionHandlerHook] getUserInfo failed but not clearing tokens (may be temporary failure)');
     }
+
     throw new Response(null, { status: 301, headers: { Location: '/' } });
   });
 
@@ -162,13 +187,21 @@ const connectionHandlerHook = async (account: Account) => {
     throw new Response(null, { status: 303, headers: { Location: '/' } });
   }
 
+  // Calculate expiresAt correctly:
+  // - accessTokenExpiresAt from Better Auth is already an absolute Date timestamp
+  // - We should use it directly, not add it to Date.now()
+  // - Fallback to 1 hour from now if not provided
+  const expiresAt = account.accessTokenExpiresAt
+    ? new Date(account.accessTokenExpiresAt)
+    : new Date(Date.now() + 3600000); // 1 hour default
+
   const updatingInfo = {
     name: userInfo.name || 'Unknown',
     picture: userInfo.photo || '',
     accessToken: account.accessToken,
     refreshToken: account.refreshToken,
     scope: driver.getScope(),
-    expiresAt: new Date(Date.now() + (account.accessTokenExpiresAt?.getTime() || 3600000)),
+    expiresAt,
   };
 
   console.log('[connectionHandlerHook] Creating connection:', {
@@ -179,6 +212,8 @@ const connectionHandlerHook = async (account: Account) => {
     hasRefreshToken: !!updatingInfo.refreshToken,
     accessTokenLength: updatingInfo.accessToken?.length,
     refreshTokenLength: updatingInfo.refreshToken?.length,
+    expiresAt: updatingInfo.expiresAt.toISOString(),
+    originalExpiresAt: account.accessTokenExpiresAt?.toISOString?.() || account.accessTokenExpiresAt,
   });
 
   const db = await getZeroDB(account.userId);
