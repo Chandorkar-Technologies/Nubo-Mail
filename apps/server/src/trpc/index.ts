@@ -24,12 +24,14 @@ import { notificationsRouter } from './routes/notifications';
 import { attachmentsRouter } from './routes/attachments';
 import { driveRouter } from './routes/drive';
 import { pushRouter } from './routes/push';
+import { calendarRouter } from './routes/calendar';
 
 export const appRouter = router({
   ai: aiRouter,
   attachments: attachmentsRouter,
   bimi: bimiRouter,
   brain: brainRouter,
+  calendar: calendarRouter,
   categories: categoriesRouter,
   connections: connectionsRouter,
   cookiePreferences: cookiePreferencesRouter,

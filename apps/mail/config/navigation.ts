@@ -15,7 +15,7 @@ import {
   LockIcon,
   Clock,
 } from '@/components/icons/icons';
-import { MessageSquareIcon, Video, HardDrive, KanbanSquare, UserCircle, Bell, Paperclip, Headset, MessageCircle, AtSign } from 'lucide-react';
+import { MessageSquareIcon, Video, HardDrive, KanbanSquare, UserCircle, Bell, Paperclip, Headset, MessageCircle, AtSign, Calendar } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 
 export interface NavItem {
@@ -71,26 +71,38 @@ export const navigationConfig: Record<string, NavConfig> = {
             icon: Plane2,
             shortcut: 'g + t',
           },
+        ],
+      },
+      {
+        title: 'Elements',
+        items: [
           {
             id: 'meet',
-            title: 'Nubo Meet',
+            title: 'Meet',
             url: '/meet',
             icon: Video,
-            shortcut: 'g + v',
+            shortcut: 'g + m',
           },
           {
             id: 'drive',
-            title: 'Nubo Drive',
+            title: 'Drive',
             url: '/drive',
             icon: HardDrive,
             shortcut: 'g + r',
           },
           {
             id: 'chat',
-            title: 'Nubo Chat',
+            title: 'Chat',
             url: '/chat',
             icon: MessageCircle,
             shortcut: 'g + c',
+          },
+          {
+            id: 'calendar',
+            title: 'Calendar',
+            url: '/calendar',
+            icon: Calendar,
+            shortcut: 'g + l',
           },
         ],
       },
@@ -207,6 +219,22 @@ export const navigationConfig: Record<string, NavConfig> = {
   },
   chat: {
     path: '/chat',
+    sections: [
+      {
+        title: 'Navigation',
+        items: [
+          {
+            title: m['common.actions.back'](),
+            url: '/mail',
+            icon: ArrowLeft,
+            isBackButton: true,
+          },
+        ],
+      },
+    ],
+  },
+  calendar: {
+    path: '/calendar',
     sections: [
       {
         title: 'Navigation',

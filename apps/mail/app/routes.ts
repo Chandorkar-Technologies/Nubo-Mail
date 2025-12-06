@@ -29,6 +29,7 @@ export default [
     route('/meet', '(routes)/meet/page.tsx'),
     route('/drive', '(routes)/drive/page.tsx'),
     route('/chat', '(routes)/chat/page.tsx'),
+    route('/calendar', '(routes)/calendar/page.tsx'),
     route('/drive/edit/:fileId', '(routes)/drive/edit/[fileId]/page.tsx'),
     layout(
       '(routes)/mail/layout.tsx',

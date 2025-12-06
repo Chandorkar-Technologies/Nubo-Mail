@@ -799,3 +799,274 @@ export const pushSubscriptionRelations = relations(pushSubscription, ({ one }) =
     references: [user.id],
   }),
 }));
+
+// ==================== NUBO CALENDAR ====================
+
+// Calendar - User's calendars (like Google Calendar's multiple calendars)
+export const calendar = createTable(
+  'calendar',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    color: text('color').notNull().default('#3b82f6'), // Default blue
+    isDefault: boolean('is_default').default(false),
+    isVisible: boolean('is_visible').default(true),
+    // External calendar sync
+    source: text('source').$type<'local' | 'google' | 'microsoft'>().default('local'),
+    sourceCalendarId: text('source_calendar_id'), // External calendar ID for synced calendars
+    syncToken: text('sync_token'), // For incremental sync
+    lastSyncedAt: timestamp('last_synced_at'),
+    // Timestamps
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_user_id_idx').on(t.userId),
+    index('calendar_source_idx').on(t.source),
+    index('calendar_is_default_idx').on(t.userId, t.isDefault),
+  ],
+);
+
+// Calendar Event - Individual events
+export const calendarEvent = createTable(
+  'calendar_event',
+  {
+    id: text('id').primaryKey(),
+    calendarId: text('calendar_id')
+      .notNull()
+      .references(() => calendar.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Basic event info
+    title: text('title').notNull(),
+    description: text('description'),
+    location: text('location'),
+    color: text('color'), // Override calendar color
+    // Time
+    startTime: timestamp('start_time').notNull(),
+    endTime: timestamp('end_time').notNull(),
+    timezone: text('timezone').default('UTC'),
+    isAllDay: boolean('is_all_day').default(false),
+    // Recurrence (RRULE format stored as JSON)
+    isRecurring: boolean('is_recurring').default(false),
+    recurrenceRule: jsonb('recurrence_rule').$type<{
+      frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+      interval: number;
+      count?: number;
+      until?: string;
+      byDay?: string[];
+      byMonthDay?: number[];
+      byMonth?: number[];
+      bySetPos?: number[];
+      weekStart?: string;
+      exceptions?: string[];
+    }>(),
+    // For recurring event instances
+    isRecurringInstance: boolean('is_recurring_instance').default(false),
+    originalEventId: text('original_event_id'), // Parent recurring event
+    originalStartTime: timestamp('original_start_time'), // Original time before modification
+    recurrenceStatus: text('recurrence_status').$type<'confirmed' | 'cancelled' | 'modified'>(),
+    // External sync
+    source: text('source').$type<'local' | 'google' | 'microsoft'>().default('local'),
+    sourceEventId: text('source_event_id'), // External event ID
+    // Status
+    status: text('status').$type<'confirmed' | 'tentative' | 'cancelled'>().default('confirmed'),
+    // Video conferencing
+    conferenceUrl: text('conference_url'),
+    conferenceType: text('conference_type').$type<'nubo_meet' | 'google_meet' | 'zoom' | 'teams'>(),
+    // Metadata
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_event_calendar_id_idx').on(t.calendarId),
+    index('calendar_event_user_id_idx').on(t.userId),
+    index('calendar_event_start_time_idx').on(t.startTime),
+    index('calendar_event_end_time_idx').on(t.endTime),
+    index('calendar_event_time_range_idx').on(t.startTime, t.endTime),
+    index('calendar_event_recurring_idx').on(t.isRecurring),
+    index('calendar_event_original_event_idx').on(t.originalEventId),
+    index('calendar_event_source_idx').on(t.source, t.sourceEventId),
+  ],
+);
+
+// Event Attendees - People invited to events
+export const calendarEventAttendee = createTable(
+  'calendar_event_attendee',
+  {
+    id: text('id').primaryKey(),
+    eventId: text('event_id')
+      .notNull()
+      .references(() => calendarEvent.id, { onDelete: 'cascade' }),
+    // Attendee info
+    email: text('email').notNull(),
+    name: text('name'),
+    // Response status
+    responseStatus: text('response_status')
+      .$type<'needsAction' | 'accepted' | 'declined' | 'tentative'>()
+      .default('needsAction'),
+    // Role
+    isOrganizer: boolean('is_organizer').default(false),
+    isOptional: boolean('is_optional').default(false),
+    // If attendee is a Nubo user
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    // Timestamps
+    respondedAt: timestamp('responded_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_event_attendee_event_id_idx').on(t.eventId),
+    index('calendar_event_attendee_email_idx').on(t.email),
+    index('calendar_event_attendee_user_id_idx').on(t.userId),
+    unique('calendar_event_attendee_unique').on(t.eventId, t.email),
+  ],
+);
+
+// Event Reminders - Notifications before events
+export const calendarEventReminder = createTable(
+  'calendar_event_reminder',
+  {
+    id: text('id').primaryKey(),
+    eventId: text('event_id')
+      .notNull()
+      .references(() => calendarEvent.id, { onDelete: 'cascade' }),
+    // Reminder timing (minutes before event)
+    minutesBefore: integer('minutes_before').notNull(),
+    // Reminder method
+    method: text('method').$type<'email' | 'push' | 'popup'>().default('push'),
+    // Whether reminder was sent
+    isSent: boolean('is_sent').default(false),
+    sentAt: timestamp('sent_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_event_reminder_event_id_idx').on(t.eventId),
+    index('calendar_event_reminder_sent_idx').on(t.isSent),
+  ],
+);
+
+// Calendar Sharing - Share calendars with other users
+export const calendarShare = createTable(
+  'calendar_share',
+  {
+    id: text('id').primaryKey(),
+    calendarId: text('calendar_id')
+      .notNull()
+      .references(() => calendar.id, { onDelete: 'cascade' }),
+    // Who it's shared with
+    sharedWithUserId: text('shared_with_user_id').references(() => user.id, { onDelete: 'cascade' }),
+    sharedWithEmail: text('shared_with_email'), // For external invites
+    // Access level
+    accessLevel: text('access_level')
+      .$type<'freeBusy' | 'read' | 'write' | 'admin'>()
+      .default('read'),
+    // Status
+    status: text('status').$type<'pending' | 'accepted' | 'declined'>().default('pending'),
+    // Timestamps
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_share_calendar_id_idx').on(t.calendarId),
+    index('calendar_share_shared_with_user_idx').on(t.sharedWithUserId),
+    index('calendar_share_status_idx').on(t.status),
+    unique('calendar_share_unique').on(t.calendarId, t.sharedWithUserId),
+  ],
+);
+
+// AI Chat History for Calendar - Store conversation context
+export const calendarAiChat = createTable(
+  'calendar_ai_chat',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    conversationId: text('conversation_id').notNull(),
+    role: text('role').$type<'user' | 'assistant' | 'system'>().notNull(),
+    content: text('content').notNull(),
+    // Tool calls and results
+    toolCalls: jsonb('tool_calls').$type<{
+      name: string;
+      arguments: Record<string, unknown>;
+      result?: unknown;
+    }[]>(),
+    // Timestamps
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendar_ai_chat_user_id_idx').on(t.userId),
+    index('calendar_ai_chat_conversation_id_idx').on(t.conversationId),
+    index('calendar_ai_chat_user_conversation_idx').on(t.userId, t.conversationId),
+  ],
+);
+
+// Calendar Relations
+export const calendarRelations = relations(calendar, ({ one, many }) => ({
+  user: one(user, {
+    fields: [calendar.userId],
+    references: [user.id],
+  }),
+  events: many(calendarEvent),
+  shares: many(calendarShare),
+}));
+
+export const calendarEventRelations = relations(calendarEvent, ({ one, many }) => ({
+  calendar: one(calendar, {
+    fields: [calendarEvent.calendarId],
+    references: [calendar.id],
+  }),
+  user: one(user, {
+    fields: [calendarEvent.userId],
+    references: [user.id],
+  }),
+  originalEvent: one(calendarEvent, {
+    fields: [calendarEvent.originalEventId],
+    references: [calendarEvent.id],
+    relationName: 'recurringInstances',
+  }),
+  recurringInstances: many(calendarEvent, { relationName: 'recurringInstances' }),
+  attendees: many(calendarEventAttendee),
+  reminders: many(calendarEventReminder),
+}));
+
+export const calendarEventAttendeeRelations = relations(calendarEventAttendee, ({ one }) => ({
+  event: one(calendarEvent, {
+    fields: [calendarEventAttendee.eventId],
+    references: [calendarEvent.id],
+  }),
+  user: one(user, {
+    fields: [calendarEventAttendee.userId],
+    references: [user.id],
+  }),
+}));
+
+export const calendarEventReminderRelations = relations(calendarEventReminder, ({ one }) => ({
+  event: one(calendarEvent, {
+    fields: [calendarEventReminder.eventId],
+    references: [calendarEvent.id],
+  }),
+}));
+
+export const calendarShareRelations = relations(calendarShare, ({ one }) => ({
+  calendar: one(calendar, {
+    fields: [calendarShare.calendarId],
+    references: [calendar.id],
+  }),
+  sharedWithUser: one(user, {
+    fields: [calendarShare.sharedWithUserId],
+    references: [user.id],
+  }),
+}));
+
+export const calendarAiChatRelations = relations(calendarAiChat, ({ one }) => ({
+  user: one(user, {
+    fields: [calendarAiChat.userId],
+    references: [user.id],
+  }),
+}));
