@@ -30,15 +30,26 @@ export class SyncEngine {
             return;
         }
 
+        // Determine secure mode based on port:
+        // - Port 993: implicit TLS (secure: true)
+        // - Port 143: STARTTLS (secure: false, ImapFlow upgrades automatically)
+        const imapPort = config.imap.port;
+        const imapSecure = imapPort === 993;
+
+        this.logger.info(`[IMAP] Connecting to ${config.imap.host}:${imapPort} (secure: ${imapSecure})`);
+
         const client = new ImapFlow({
             host: config.imap.host,
-            port: config.imap.port,
-            secure: config.imap.secure,
+            port: imapPort,
+            secure: imapSecure,
             auth: {
                 user: config.auth.user,
                 pass: config.auth.pass,
             },
             logger: false, // Disable internal logger to avoid noise
+            tls: {
+                rejectUnauthorized: false, // Allow self-signed certificates
+            },
         });
 
         try {
