@@ -1193,6 +1193,106 @@ const app = new Hono<HonoContext>()
     }),
   )
   .get('/health', (c) => c.json({ message: 'Nubo TRPC Worker is Up!' }))
+  // Rocket.Chat SSO endpoint - get token for authenticated user
+  .get('/rocketchat/token', async (c) => {
+    try {
+      const rcUrl = c.env.ROCKETCHAT_URL;
+      const rcAdminToken = c.env.ROCKETCHAT_ADMIN_AUTH_TOKEN;
+      const rcAdminUserId = c.env.ROCKETCHAT_ADMIN_USER_ID;
+
+      if (!rcUrl || !rcAdminToken || !rcAdminUserId) {
+        return c.json({ error: 'Rocket.Chat not configured' }, 500);
+      }
+
+      // Validate session
+      const auth = createAuth();
+      const session = await auth.api.getSession({ headers: c.req.raw.headers });
+
+      if (!session?.user?.id) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+
+      // Get user's Nubo username from database
+      const { db } = createDb(c.env.HYPERDRIVE.connectionString);
+      const nuboUser = await db.query.user.findFirst({
+        where: eq(user.id, session.user.id),
+        columns: { id: true, username: true, name: true, email: true },
+      });
+
+      if (!nuboUser?.username) {
+        return c.json({ error: 'No Nubo username set' }, 400);
+      }
+
+      const rcUsername = nuboUser.username;
+      const rcEmail = `${nuboUser.username}@nubo.email`;
+      const rcName = nuboUser.name || nuboUser.username;
+
+      // Helper to call Rocket.Chat API
+      const rcApi = async (endpoint: string, method: 'GET' | 'POST' = 'GET', body?: Record<string, unknown>) => {
+        const options: RequestInit = {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Auth-Token': rcAdminToken,
+            'X-User-Id': rcAdminUserId,
+          },
+        };
+        if (method === 'POST' && body) {
+          options.body = JSON.stringify(body);
+        }
+        const response = await fetch(`${rcUrl}/api/v1${endpoint}`, options);
+        return response.json();
+      };
+
+      // Check if user exists in Rocket.Chat
+      let rcUser: any = null;
+      try {
+        const userInfo = await rcApi(`/users.info?username=${rcUsername}`) as any;
+        if (userInfo.success && userInfo.user) {
+          rcUser = userInfo.user;
+        }
+      } catch {
+        // User doesn't exist
+      }
+
+      // Create user if doesn't exist
+      if (!rcUser) {
+        console.log('[ROCKETCHAT] Creating user:', rcUsername);
+        const createResult = await rcApi('/users.create', 'POST', {
+          username: rcUsername,
+          email: rcEmail,
+          name: rcName,
+          password: crypto.randomUUID(),
+          verified: true,
+        }) as any;
+
+        if (!createResult.success) {
+          console.error('[ROCKETCHAT] Failed to create user:', createResult);
+          return c.json({ error: 'Failed to create Rocket.Chat user' }, 500);
+        }
+        rcUser = createResult.user;
+      }
+
+      // Generate login token
+      const tokenResult = await rcApi('/users.createToken', 'POST', {
+        userId: rcUser._id,
+      }) as any;
+
+      if (!tokenResult.success || !tokenResult.data?.authToken) {
+        console.error('[ROCKETCHAT] Failed to create token:', tokenResult);
+        return c.json({ error: 'Failed to create token' }, 500);
+      }
+
+      return c.json({
+        token: tokenResult.data.authToken,
+        userId: rcUser._id,
+        username: rcUser.username,
+      });
+    } catch (error) {
+      console.error('[ROCKETCHAT] Token error:', error);
+      return c.json({ error: 'Internal error' }, 500);
+    }
+  })
   // Google Pub/Sub notification endpoint for Gmail sync
   .post('/a8n/notify/:providerId', async (c) => {
     const tracer = initTracing();

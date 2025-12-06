@@ -45,7 +45,7 @@ export default function NuboChatPage() {
 
     const fetchToken = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/webhooks/rocketchat/token`, {
+        const response = await fetch(`${BACKEND_URL}/rocketchat/token`, {
           credentials: 'include',
         });
 
