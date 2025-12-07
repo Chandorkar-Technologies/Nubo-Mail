@@ -24,6 +24,36 @@ export default [
   route('/forgot-password', '(auth)/forgot-password/page.tsx'),
   route('/reset-password', '(auth)/reset-password/page.tsx'),
 
+  // B2B Admin Dashboard
+  layout('(routes)/admin/layout.tsx', [
+    route('/admin', '(routes)/admin/page.tsx'),
+    route('/admin/partners', '(routes)/admin/partners/page.tsx'),
+    route('/admin/approvals', '(routes)/admin/approvals/page.tsx'),
+  ]),
+
+  // B2B Partner Dashboard
+  layout('(routes)/partner/layout.tsx', [
+    route('/partner', '(routes)/partner/page.tsx'),
+    route('/partner/organizations', '(routes)/partner/organizations/page.tsx'),
+    route('/partner/organizations/new', '(routes)/partner/organizations/new/page.tsx'),
+    route('/partner/storage', '(routes)/partner/storage/page.tsx'),
+    route('/partner/invoices', '(routes)/partner/invoices/page.tsx'),
+    route('/partner/pricing', '(routes)/partner/pricing/page.tsx'),
+    route('/partner/settings', '(routes)/partner/settings/page.tsx'),
+    route('/partner/apply', '(routes)/partner/apply/page.tsx'),
+  ]),
+
+  // B2B Workspace Dashboard
+  layout('(routes)/workspace/layout.tsx', [
+    route('/workspace', '(routes)/workspace/page.tsx'),
+    route('/workspace/domains', '(routes)/workspace/domains/page.tsx'),
+    route('/workspace/users', '(routes)/workspace/users/page.tsx'),
+    route('/workspace/storage', '(routes)/workspace/storage/page.tsx'),
+    route('/workspace/archival', '(routes)/workspace/archival/page.tsx'),
+    route('/workspace/invoices', '(routes)/workspace/invoices/page.tsx'),
+    route('/workspace/settings', '(routes)/workspace/settings/page.tsx'),
+  ]),
+
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
     route('/meet', '(routes)/meet/page.tsx'),
