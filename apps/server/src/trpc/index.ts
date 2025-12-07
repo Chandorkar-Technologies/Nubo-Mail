@@ -25,6 +25,11 @@ import { attachmentsRouter } from './routes/attachments';
 import { driveRouter } from './routes/drive';
 import { pushRouter } from './routes/push';
 import { calendarRouter } from './routes/calendar';
+// B2B Enterprise routers
+import { adminRouter } from './routes/admin';
+import { partnerRouter } from './routes/partner';
+import { workspaceRouter } from './routes/workspace';
+import { razorpayB2BRouter } from './routes/razorpay-b2b';
 
 export const appRouter = router({
   ai: aiRouter,
@@ -50,6 +55,11 @@ export const appRouter = router({
   templates: templatesRouter,
   logging: loggingRouter,
   livekit: livekitRouter,
+  // B2B Enterprise routers
+  admin: adminRouter,
+  partner: partnerRouter,
+  workspace: workspaceRouter,
+  razorpayB2B: razorpayB2BRouter,
 });
 
 export type AppRouter = typeof appRouter;
