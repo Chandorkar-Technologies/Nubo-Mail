@@ -513,7 +513,8 @@ driveApiRouter.get('/shared/:token/editor-config', async (c) => {
           : 'word';
 
     // Generate unique key for this editing session
-    const documentKey = `${file.id}-${new Date(file.updatedAt).getTime()}`;
+    const timestamp = new Date(file.updatedAt).getTime();
+    const documentKey = `${file.id}-${timestamp}`;
 
     // OnlyOffice Document Server configuration
     const config = {
@@ -521,7 +522,8 @@ driveApiRouter.get('/shared/:token/editor-config', async (c) => {
         fileType: ext,
         key: documentKey,
         title: file.name,
-        url: `${backendUrl}/api/drive/file/${file.id}/content`,
+        // Add cache-busting parameter to ensure fresh content is loaded
+        url: `${backendUrl}/api/drive/file/${file.id}/content?v=${timestamp}`,
       },
       documentType,
       editorConfig: {
