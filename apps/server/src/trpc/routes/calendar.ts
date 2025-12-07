@@ -293,6 +293,30 @@ export const calendarRouter = router({
       }
 
       const eventId = crypto.randomUUID();
+      let conferenceUrl: string | undefined;
+
+      // If Nubo Meet is selected, create a meeting
+      if (input.conferenceType === 'nubo_meet') {
+        const { livekitMeeting } = await import('../../db/schema');
+        const meetingId = crypto.randomUUID();
+        const roomName = `meeting-${meetingId}`;
+        conferenceUrl = `${env.VITE_PUBLIC_APP_URL}/meet/${meetingId}`;
+
+        // Create meeting record
+        await ctx.db.insert(livekitMeeting).values({
+          id: meetingId,
+          roomName,
+          title: input.title,
+          description: input.description,
+          hostId: sessionUser.id,
+          scheduledFor: new Date(input.startTime),
+          status: 'scheduled',
+          maxParticipants: 50,
+          recordingEnabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
 
       // Create the event
       const newEvent = {
@@ -313,6 +337,7 @@ export const calendarRouter = router({
         source: 'local' as const,
         status: 'confirmed' as const,
         conferenceType: input.conferenceType,
+        conferenceUrl,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

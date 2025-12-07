@@ -339,17 +339,23 @@ export function EventDialog({
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {calendars.map((cal) => (
-                            <SelectItem key={cal.id} value={cal.id}>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="h-3 w-3 rounded-full"
-                                  style={{ backgroundColor: cal.color }}
-                                />
-                                {cal.name}
-                              </div>
-                            </SelectItem>
-                          ))}
+                          {calendars.length === 0 ? (
+                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                              Loading calendars...
+                            </div>
+                          ) : (
+                            calendars.map((cal) => (
+                              <SelectItem key={cal.id} value={cal.id}>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-3 w-3 rounded-full"
+                                    style={{ backgroundColor: cal.color }}
+                                  />
+                                  {cal.name}
+                                </div>
+                              </SelectItem>
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
                       <FormMessage />
