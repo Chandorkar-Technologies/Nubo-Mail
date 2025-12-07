@@ -183,10 +183,46 @@ driveApiRouter.get('/file/:fileId/content', async (c) => {
 // OnlyOffice callback endpoint
 driveApiRouter.post('/onlyoffice/callback', async (c) => {
   try {
+    const jwtSecret = env.ONLYOFFICE_JWT_SECRET;
+
+    // Verify JWT token from OnlyOffice if JWT is configured
+    if (jwtSecret) {
+      const authHeader = c.req.header('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        try {
+          const isValid = await jwt.verify(token, jwtSecret, { algorithm: 'HS256' });
+          if (!isValid) {
+            console.error('[OnlyOffice Callback] Invalid JWT token');
+            return c.json({ error: 1 });
+          }
+        } catch (jwtError) {
+          console.error('[OnlyOffice Callback] JWT verification error:', jwtError);
+          // Continue anyway as some OnlyOffice versions may not send JWT in callback
+        }
+      }
+    }
+
     const body = await c.req.json();
     console.log('[OnlyOffice Callback]', JSON.stringify(body));
 
-    const { status, key, url } = body;
+    // Check if body contains a token (OnlyOffice can also send JWT in body)
+    let callbackData = body;
+    if (body.token && jwtSecret) {
+      try {
+        const isValid = await jwt.verify(body.token, jwtSecret, { algorithm: 'HS256' });
+        if (isValid) {
+          const decoded = jwt.decode(body.token);
+          if (decoded && decoded.payload) {
+            callbackData = decoded.payload as typeof body;
+          }
+        }
+      } catch (tokenError) {
+        console.error('[OnlyOffice Callback] Body token verification error:', tokenError);
+      }
+    }
+
+    const { status, key, url } = callbackData;
 
     // Status codes:
     // 0 - no document with the key identifier could be found
@@ -215,9 +251,16 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
         }
 
         // Download the edited document from OnlyOffice
-        const response = await fetch(url);
+        // OnlyOffice may require JWT authentication for downloading
+        const fetchHeaders: HeadersInit = {};
+        if (jwtSecret) {
+          const downloadToken = await jwt.sign({ url }, jwtSecret, { algorithm: 'HS256' });
+          fetchHeaders['Authorization'] = `Bearer ${downloadToken}`;
+        }
+
+        const response = await fetch(url, { headers: fetchHeaders });
         if (!response.ok) {
-          console.error(`[OnlyOffice Callback] Failed to download document: ${response.status}`);
+          console.error(`[OnlyOffice Callback] Failed to download document: ${response.status} ${await response.text()}`);
           return c.json({ error: 0 });
         }
 
