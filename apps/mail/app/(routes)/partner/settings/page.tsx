@@ -1,3 +1,5 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {
@@ -115,7 +117,7 @@ export default function PartnerSettingsPage() {
   }
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>

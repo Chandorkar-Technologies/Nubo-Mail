@@ -24,14 +24,26 @@ interface BillingContext {
   db: any; // DrizzleDB instance
 }
 
-// Generate unique invoice number
-function generateInvoiceNumber(): string {
+// Generate unique invoice number with sequential counter
+// Format: INV-YYMM-XXX where XXX is sequential within the month
+async function generateInvoiceNumber(db: any): Promise<string> {
   const prefix = 'INV';
   const date = new Date();
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-  return `${prefix}-${year}${month}-${random}`;
+  const yearMonth = `${year}${month}`;
+
+  // Get the count of invoices for this month to generate sequential number
+  const pattern = `${prefix}-${yearMonth}-%`;
+  const existingInvoices = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(invoice)
+    .where(sql`${invoice.invoiceNumber} LIKE ${pattern}`);
+
+  const count = (existingInvoices[0]?.count ?? 0) + 1;
+  const sequence = count.toString().padStart(3, '0');
+
+  return `${prefix}-${yearMonth}-${sequence}`;
 }
 
 // Calculate GST (18%)
@@ -110,7 +122,7 @@ export async function generateMonthlyInvoices(ctx: BillingContext): Promise<{
       const totalAmount = discountedPrice + taxAmount;
 
       // Create invoice
-      const invoiceNumber = generateInvoiceNumber();
+      const invoiceNumber = await generateInvoiceNumber(db);
       const dueDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
       const newInvoice = await db

@@ -134,7 +134,7 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 w-full overflow-auto">
         <Outlet />
       </main>
     </div>

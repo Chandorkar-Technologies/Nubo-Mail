@@ -90,11 +90,14 @@ export const razorpayB2BRouter = router({
       const gst = calculateGST(discountedPrice);
       const totalAmount = discountedPrice + gst.total;
 
-      // Create Razorpay order
+      // Create Razorpay order (receipt max 40 chars)
+      const shortId = partnerId.substring(0, 6);
+      const timestamp = Date.now().toString(36);
+      const receiptId = `st_${shortId}_${timestamp}`;
       const razorpayOrder = await callRazorpayAPI('/orders', 'POST', {
         amount: Math.round(totalAmount * 100), // Convert to paise
         currency: 'INR',
-        receipt: `storage-${partnerId}-${Date.now()}`,
+        receipt: receiptId,
         notes: {
           partnerId,
           storageSizeGB,
@@ -104,6 +107,9 @@ export const razorpayB2BRouter = router({
 
       // Create invoice in database
       const invoiceNumber = generateInvoiceNumber();
+      const dueDateStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0]; // Format as YYYY-MM-DD for date column
       const newInvoice = await db
         .insert(invoice)
         .values({
@@ -111,16 +117,14 @@ export const razorpayB2BRouter = router({
           invoiceNumber,
           partnerId,
           organizationId: null,
-          invoiceType: 'storage',
-          status: 'pending',
-          subtotal: discountedPrice.toString(),
-          taxAmount: gst.total.toString(),
-          totalAmount: totalAmount.toString(),
+          type: 'partner', // partner storage purchase
+          status: 'draft', // pending payment
+          subtotal: discountedPrice.toFixed(2),
+          gstAmount: gst.total.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
           currency: 'INR',
-          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          dueDate: dueDateStr,
           razorpayOrderId: razorpayOrder.id,
-          createdAt: new Date(),
-          updatedAt: new Date(),
         })
         .returning();
 
@@ -196,11 +200,14 @@ export const razorpayB2BRouter = router({
       const gst = calculateGST(discountedPrice);
       const totalAmount = discountedPrice + gst.total;
 
-      // Create Razorpay order
+      // Create Razorpay order (receipt max 40 chars)
+      const shortOrgId = organizationId.substring(0, 6);
+      const subTimestamp = Date.now().toString(36);
+      const subReceiptId = `sb_${shortOrgId}_${subTimestamp}`;
       const razorpayOrder = await callRazorpayAPI('/orders', 'POST', {
         amount: Math.round(totalAmount * 100), // Convert to paise
         currency: 'INR',
-        receipt: `sub-${organizationId}-${Date.now()}`,
+        receipt: subReceiptId,
         notes: {
           organizationId,
           planVariantId,
@@ -212,6 +219,9 @@ export const razorpayB2BRouter = router({
 
       // Create invoice
       const invoiceNumber = generateInvoiceNumber();
+      const subDueDateStr = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0]; // Format as YYYY-MM-DD for date column
       const newInvoice = await db
         .insert(invoice)
         .values({
@@ -219,16 +229,14 @@ export const razorpayB2BRouter = router({
           invoiceNumber,
           partnerId: org.partnerId,
           organizationId,
-          invoiceType: 'subscription',
-          status: 'pending',
-          subtotal: discountedPrice.toString(),
-          taxAmount: gst.total.toString(),
-          totalAmount: totalAmount.toString(),
+          type: 'organization', // organization subscription
+          status: 'draft', // pending payment
+          subtotal: discountedPrice.toFixed(2),
+          gstAmount: gst.total.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
           currency: 'INR',
-          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          dueDate: subDueDateStr,
           razorpayOrderId: razorpayOrder.id,
-          createdAt: new Date(),
-          updatedAt: new Date(),
         })
         .returning();
 
@@ -312,17 +320,19 @@ export const razorpayB2BRouter = router({
       await db.insert(paymentTransaction).values({
         id: crypto.randomUUID(),
         invoiceId,
+        partnerId: invoiceData.partnerId,
+        organizationId: invoiceData.organizationId,
+        razorpayOrderId,
         razorpayPaymentId,
+        razorpaySignature,
         amount: invoiceData.totalAmount,
-        currency: invoiceData.currency,
-        status: 'captured',
+        currency: invoiceData.currency || 'INR',
+        status: 'success',
         paymentMethod: paymentDetails.method || 'unknown',
-        metadata: paymentDetails,
-        createdAt: new Date(),
       });
 
       // Handle post-payment actions based on invoice type
-      if (invoiceData.invoiceType === 'storage' && invoiceData.partnerId) {
+      if (invoiceData.type === 'partner' && invoiceData.partnerId) {
         // Allocate storage to partner
         const orderDetails = paymentDetails.notes;
         if (orderDetails?.storageSizeGB) {

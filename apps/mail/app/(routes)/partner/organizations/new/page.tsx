@@ -1,7 +1,9 @@
+'use client';
+
 import { api } from '@/lib/trpc';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Building2, ArrowLeft } from 'lucide-react';
+import { Building2, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,32 +12,50 @@ import { toast } from 'sonner';
 export default function CreateOrganizationPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [availableStorage, setAvailableStorage] = useState<number>(0);
   const [formData, setFormData] = useState({
     name: '',
-    slug: '',
-    allocatedStorageBytes: 10 * 1024 * 1024 * 1024, // 10 GB default
+    totalStorageBytes: 10 * 1024 * 1024 * 1024, // 10 GB default
   });
 
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-  };
+  useEffect(() => {
+    // Fetch available storage from partner pool
+    const fetchAvailableStorage = async () => {
+      try {
+        const stats = await api.partner.getDashboardStats.query();
+        setAvailableStorage(stats.storage.allocated - stats.storage.used);
+      } catch (error) {
+        console.error('Failed to fetch storage stats:', error);
+      }
+    };
+    fetchAvailableStorage();
+  }, []);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const name = e.target.value;
     setFormData((prev) => ({
       ...prev,
       name,
-      slug: generateSlug(name),
     }));
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.slug) {
+    if (!formData.name) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if (formData.totalStorageBytes > availableStorage) {
+      toast.error(`Insufficient storage. Available: ${formatBytes(availableStorage)}`);
       return;
     }
 
@@ -43,11 +63,10 @@ export default function CreateOrganizationPage() {
     try {
       const result = await api.partner.createOrganization.mutate({
         name: formData.name,
-        slug: formData.slug,
-        allocatedStorageBytes: formData.allocatedStorageBytes,
+        totalStorageBytes: formData.totalStorageBytes,
       });
       toast.success('Organization created successfully');
-      navigate(`/partner/organizations/${result.id}`);
+      navigate(`/partner/organizations/${result.organizationId}`);
     } catch (error: any) {
       console.error('Failed to create organization:', error);
       toast.error(error.message || 'Failed to create organization');
@@ -103,52 +122,47 @@ export default function CreateOrganizationPage() {
             />
           </div>
 
-          {/* Slug */}
-          <div className="space-y-2">
-            <Label htmlFor="slug">Organization Slug *</Label>
-            <div className="flex">
-              <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-sm">
-                nubo.email/
-              </span>
-              <Input
-                id="slug"
-                placeholder="acme-corp"
-                value={formData.slug}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, slug: generateSlug(e.target.value) }))
-                }
-                className="rounded-l-none"
-                required
-              />
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              This will be used in URLs and cannot be changed later
-            </p>
-          </div>
-
           {/* Storage Allocation */}
           <div className="space-y-2">
-            <Label>Initial Storage Allocation</Label>
-            <div className="grid grid-cols-4 gap-2">
-              {storageSizes.map((size) => (
-                <Button
-                  key={size.value}
-                  type="button"
-                  variant={formData.allocatedStorageBytes === size.value ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() =>
-                    setFormData((prev) => ({ ...prev, allocatedStorageBytes: size.value }))
-                  }
-                  className={
-                    formData.allocatedStorageBytes === size.value
-                      ? 'bg-green-600 hover:bg-green-700'
-                      : ''
-                  }
-                >
-                  {size.label}
-                </Button>
-              ))}
+            <div className="flex items-center justify-between">
+              <Label>Initial Storage Allocation</Label>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                Available: <span className="font-medium text-green-600 dark:text-green-400">{formatBytes(availableStorage)}</span>
+              </span>
             </div>
+            <div className="grid grid-cols-4 gap-2">
+              {storageSizes.map((size) => {
+                const isDisabled = size.value > availableStorage;
+                const isSelected = formData.totalStorageBytes === size.value;
+                return (
+                  <Button
+                    key={size.value}
+                    type="button"
+                    variant={isSelected ? 'default' : 'outline'}
+                    size="sm"
+                    disabled={isDisabled}
+                    onClick={() =>
+                      setFormData((prev) => ({ ...prev, totalStorageBytes: size.value }))
+                    }
+                    className={
+                      isSelected
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : isDisabled
+                          ? 'opacity-50 cursor-not-allowed'
+                          : ''
+                    }
+                  >
+                    {size.label}
+                  </Button>
+                );
+              })}
+            </div>
+            {formData.totalStorageBytes > availableStorage && (
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-sm">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Selected storage exceeds available pool. Please purchase more storage.</span>
+              </div>
+            )}
             <p className="text-xs text-gray-500 dark:text-gray-400">
               This storage comes from your partner storage pool. You can adjust it later.
             </p>

@@ -1,3 +1,5 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {

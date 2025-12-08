@@ -12,7 +12,6 @@ import {
   ChevronDown,
   LogOut,
   Handshake,
-  DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -35,24 +34,40 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
     const status = await api.partner.getApplicationStatus.query();
 
     if (status.isPartner) {
-      // User is an approved partner
+      // User is an approved partner - get their profile
       const profile = await api.partner.getPartnerProfile.query();
-      return { user: session.user, partner: profile.partner, tier: profile.tier };
+      return {
+        user: session.user,
+        partner: profile.partner,
+        tier: profile.tier,
+        status: 'approved' as const,
+      };
     } else if (status.status === 'pending') {
-      // Has pending application - show waiting page
-      return { user: session.user, applicationPending: true, application: status.application };
+      // Has pending application
+      return {
+        user: session.user,
+        status: 'pending' as const,
+        application: status.application
+      };
     } else if (status.status === 'rejected') {
       // Application was rejected
-      return { user: session.user, applicationRejected: true, application: status.application };
+      return {
+        user: session.user,
+        status: 'rejected' as const,
+        application: status.application
+      };
     } else {
       // No application - redirect to apply page
       throw redirect('/partner/apply');
     }
   } catch (error: any) {
-    if (error?.message?.includes('Partner access required')) {
-      throw redirect('/partner/apply');
+    // If it's already a redirect, re-throw it
+    if (error?.status === 302 || error?.headers) {
+      throw error;
     }
-    throw error;
+    // For any other error, redirect to apply
+    console.error('Partner loader error:', error);
+    throw redirect('/partner/apply');
   }
 }
 
@@ -61,7 +76,6 @@ const navItems = [
   { href: '/partner/organizations', label: 'Organizations', icon: Building2 },
   { href: '/partner/storage', label: 'Storage', icon: HardDrive },
   { href: '/partner/invoices', label: 'Invoices', icon: CreditCard },
-  { href: '/partner/pricing', label: 'Pricing', icon: DollarSign },
   { href: '/partner/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -72,8 +86,15 @@ const tierColors: Record<string, string> = {
   gold: 'bg-yellow-500',
 };
 
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
-  const { user, partner, tier, applicationPending, applicationRejected, application } = loaderData;
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -81,8 +102,9 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
     navigate('/login');
   };
 
-  // Show pending application status
-  if (applicationPending) {
+  // Handle pending application
+  if (loaderData.status === 'pending') {
+    const { application } = loaderData;
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 max-w-md w-full mx-4 text-center">
@@ -104,8 +126,9 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  // Show rejected application status
-  if (applicationRejected) {
+  // Handle rejected application
+  if (loaderData.status === 'rejected') {
+    const { application } = loaderData;
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 max-w-md w-full mx-4 text-center">
@@ -137,6 +160,9 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
       </div>
     );
   }
+
+  // Approved partner - show full dashboard
+  const { user, partner, tier } = loaderData;
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -189,7 +215,7 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-500 dark:text-gray-400">Storage Pool</span>
                 <span className="text-gray-900 dark:text-white font-medium">
-                  {formatBytes(partner.usedStorageBytes)} / {formatBytes(partner.allocatedStorageBytes)}
+                  {formatBytes(partner.usedStorageBytes || 0)} / {formatBytes(partner.allocatedStorageBytes || 0)}
                 </span>
               </div>
               <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
@@ -197,9 +223,9 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
                   className="bg-green-600 h-2 rounded-full transition-all"
                   style={{
                     width: `${
-                      partner.allocatedStorageBytes > 0
+                      (partner.allocatedStorageBytes || 0) > 0
                         ? Math.min(
-                            (partner.usedStorageBytes / partner.allocatedStorageBytes) * 100,
+                            ((partner.usedStorageBytes || 0) / (partner.allocatedStorageBytes || 1)) * 100,
                             100
                           )
                         : 0
@@ -227,10 +253,10 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {partner?.companyName}
+                      {partner?.companyName || 'Partner'}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {user.email}
+                      {user?.email || ''}
                     </p>
                   </div>
                 </div>
@@ -252,17 +278,9 @@ export default function PartnerLayout({ loaderData }: Route.ComponentProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 w-full overflow-auto">
         <Outlet />
       </main>
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }

@@ -1,3 +1,5 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -19,14 +21,26 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { Trash2 } from 'lucide-react';
 
 interface Organization {
   id: string;
   name: string;
-  slug: string;
   status: string;
   allocatedStorageBytes: number;
   usedStorageBytes: number;
@@ -40,6 +54,9 @@ export default function PartnerOrganizationsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 0 });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [orgToDelete, setOrgToDelete] = useState<Organization | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -77,6 +94,29 @@ export default function PartnerOrganizationsPage() {
   const getStoragePercentage = (used: number, allocated: number) => {
     if (!allocated) return 0;
     return Math.min((used / allocated) * 100, 100);
+  };
+
+  const handleDeleteClick = (org: Organization) => {
+    setOrgToDelete(org);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!orgToDelete) return;
+    setDeleting(true);
+    try {
+      await api.partner.deleteOrganization.mutate({ organizationId: orgToDelete.id });
+      toast.success('Organization deleted successfully');
+      setOrganizations((prev) => prev.filter((o) => o.id !== orgToDelete.id));
+      setPagination((prev) => ({ ...prev, total: prev.total - 1 }));
+    } catch (error: any) {
+      console.error('Failed to delete organization:', error);
+      toast.error(error.message || 'Failed to delete organization');
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+      setOrgToDelete(null);
+    }
   };
 
   return (
@@ -153,7 +193,6 @@ export default function PartnerOrganizationsPage() {
                           <h3 className="font-medium text-gray-900 dark:text-white">
                             {org.name}
                           </h3>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">{org.slug}</p>
                         </div>
                       </div>
                       <DropdownMenu>
@@ -168,6 +207,14 @@ export default function PartnerOrganizationsPage() {
                           >
                             <Settings className="h-4 w-4 mr-2" />
                             Manage
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteClick(org)}
+                            className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-900/20"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -268,6 +315,30 @@ export default function PartnerOrganizationsPage() {
           </>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{orgToDelete?.name}</strong>? This action
+              cannot be undone. All users, domains, and data associated with this organization will
+              be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleting ? 'Deleting...' : 'Delete Organization'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

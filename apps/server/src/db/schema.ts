@@ -1253,6 +1253,9 @@ export const organization = createTable(
     // Nubo Chat (Rocket.Chat) workspace
     rocketChatWorkspaceId: text('rocket_chat_workspace_id'),
     rocketChatWorkspaceUrl: text('rocket_chat_workspace_url'),
+    // Hybrid mail (Google Workspace / Office 365 integration)
+    hybridMailEnabled: boolean('hybrid_mail_enabled').default(false),
+    hybridMailProvider: text('hybrid_mail_provider').$type<'google_workspace' | 'office365' | null>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

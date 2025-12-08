@@ -21,9 +21,13 @@ import {
   partnerTier,
   partnerQuarterlySales,
   organization,
+  organizationDomain,
+  organizationUser,
   planCategory,
   planVariant,
   invoice,
+  invoiceLineItem,
+  paymentTransaction,
   approvalRequest,
 } from '../../db/schema';
 
@@ -372,11 +376,12 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Partner not found' });
       }
 
-      // Get organizations count
-      const orgCount = await db
-        .select({ count: count() })
+      // Get organizations
+      const organizations = await db
+        .select()
         .from(organization)
-        .where(eq(organization.partnerId, input.partnerId));
+        .where(eq(organization.partnerId, input.partnerId))
+        .orderBy(desc(organization.createdAt));
 
       // Get quarterly sales
       const quarterlySales = await db
@@ -388,9 +393,107 @@ export const adminRouter = router({
 
       return {
         partner: partnerData[0],
-        organizationCount: orgCount[0]?.count ?? 0,
+        organizations,
+        organizationCount: organizations.length,
         quarterlySales,
       };
+    }),
+
+  suspendPartner: adminMiddleware
+    .input(z.object({ partnerId: z.string(), reason: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'partners:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(partner)
+        .set({
+          isActive: false,
+          suspendedAt: new Date(),
+          suspensionReason: input.reason,
+          updatedAt: new Date(),
+        })
+        .where(eq(partner.id, input.partnerId));
+
+      return { success: true };
+    }),
+
+  activatePartner: adminMiddleware
+    .input(z.object({ partnerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'partners:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(partner)
+        .set({
+          isActive: true,
+          suspendedAt: null,
+          suspensionReason: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(partner.id, input.partnerId));
+
+      return { success: true };
+    }),
+
+  updatePartnerTierById: adminMiddleware
+    .input(z.object({ partnerId: z.string(), tierName: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'partners:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      // Get tier details
+      const tier = await db
+        .select()
+        .from(partnerTier)
+        .where(eq(partnerTier.name, input.tierName))
+        .limit(1);
+
+      if (!tier.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Tier not found' });
+      }
+
+      await db
+        .update(partner)
+        .set({
+          tierId: tier[0].id,
+          tierName: tier[0].name,
+          discountPercentage: tier[0].discountPercentage,
+          updatedAt: new Date(),
+        })
+        .where(eq(partner.id, input.partnerId));
+
+      return { success: true };
+    }),
+
+  updatePartnerStorage: adminMiddleware
+    .input(z.object({ partnerId: z.string(), storageBytes: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'partners:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(partner)
+        .set({
+          allocatedStorageBytes: input.storageBytes,
+          updatedAt: new Date(),
+        })
+        .where(eq(partner.id, input.partnerId));
+
+      return { success: true };
     }),
 
   updatePartner: adminMiddleware
@@ -536,6 +639,70 @@ export const adminRouter = router({
         domains,
         userCount: userCount[0]?.count ?? 0,
       };
+    }),
+
+  updateOrganizationStorage: adminMiddleware
+    .input(z.object({ organizationId: z.string(), storageBytes: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'organizations:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(organization)
+        .set({
+          totalStorageBytes: input.storageBytes,
+          updatedAt: new Date(),
+        })
+        .where(eq(organization.id, input.organizationId));
+
+      return { success: true };
+    }),
+
+  suspendOrganization: adminMiddleware
+    .input(z.object({ organizationId: z.string(), reason: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'organizations:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(organization)
+        .set({
+          isActive: false,
+          suspendedAt: new Date(),
+          suspensionReason: input.reason || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(organization.id, input.organizationId));
+
+      return { success: true };
+    }),
+
+  activateOrganization: adminMiddleware
+    .input(z.object({ organizationId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'organizations:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      await db
+        .update(organization)
+        .set({
+          isActive: true,
+          suspendedAt: null,
+          suspensionReason: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(organization.id, input.organizationId));
+
+      return { success: true };
     }),
 
   // ======================= Approval Requests =======================
@@ -698,6 +865,64 @@ export const adminRouter = router({
         .from(planVariant)
         .where(conditions)
         .orderBy(asc(planVariant.sortOrder));
+    }),
+
+  createPlanVariant: adminMiddleware
+    .input(
+      z.object({
+        categoryId: z.string(),
+        name: z.string(),
+        displayName: z.string(),
+        storageGb: z.number(),
+        retailPriceMonthly: z.string(),
+        retailPriceYearly: z.string(),
+        partnerPriceMonthly: z.string(),
+        partnerPriceYearly: z.string(),
+        currency: z.string().optional(),
+        isActive: z.boolean().optional(),
+        sortOrder: z.number().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'pricing:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      // Verify category exists
+      const category = await db
+        .select()
+        .from(planCategory)
+        .where(eq(planCategory.id, input.categoryId))
+        .limit(1);
+
+      if (!category.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Plan category not found' });
+      }
+
+      // Convert GB to bytes
+      const storageBytes = input.storageGb * 1024 * 1024 * 1024;
+
+      const id = crypto.randomUUID();
+      await db.insert(planVariant).values({
+        id,
+        categoryId: input.categoryId,
+        name: input.name,
+        displayName: input.displayName,
+        storageBytes,
+        retailPriceMonthly: input.retailPriceMonthly,
+        retailPriceYearly: input.retailPriceYearly,
+        partnerPriceMonthly: input.partnerPriceMonthly,
+        partnerPriceYearly: input.partnerPriceYearly,
+        currency: input.currency ?? 'INR',
+        isActive: input.isActive ?? true,
+        sortOrder: input.sortOrder ?? 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      return { success: true, id };
     }),
 
   updatePlanVariant: adminMiddleware

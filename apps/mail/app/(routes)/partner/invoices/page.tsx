@@ -1,3 +1,5 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {
@@ -26,24 +28,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface Invoice {
   id: string;
   invoiceNumber: string;
   status: string;
   subtotal: string;
-  taxAmount: string;
+  gstAmount: string;
+  gstPercentage: string;
   totalAmount: string;
   currency: string;
   dueDate: string;
   createdAt: string;
   paidAt: string | null;
-  lineItems: Array<{
-    description: string;
-    quantity: number;
-    unitPrice: string;
-    totalPrice: string;
-  }>;
 }
 
 export default function PartnerInvoicesPage() {
@@ -129,6 +127,94 @@ export default function PartnerInvoicesPage() {
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     );
+  };
+
+  const handleDownloadPDF = (inv: Invoice) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Please allow popups to download the invoice');
+      return;
+    }
+
+    const statusLabel = inv.status.charAt(0).toUpperCase() + inv.status.slice(1);
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Invoice ${inv.invoiceNumber}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; color: #111; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+          .logo { font-size: 28px; font-weight: bold; color: #16a34a; }
+          .invoice-title { text-align: right; }
+          .invoice-title h1 { font-size: 32px; color: #333; margin-bottom: 8px; }
+          .invoice-number { font-size: 16px; color: #666; }
+          .meta { display: flex; justify-content: space-between; margin-bottom: 40px; padding: 20px; background: #f9fafb; border-radius: 8px; }
+          .meta-item h3 { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
+          .meta-item p { font-size: 14px; color: #111; font-weight: 500; }
+          .status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+          .status-paid { background: #dcfce7; color: #166534; }
+          .status-pending, .status-draft { background: #fef9c3; color: #854d0e; }
+          .status-overdue { background: #fee2e2; color: #991b1b; }
+          .status-cancelled { background: #e5e7eb; color: #374151; }
+          .totals { margin-top: 30px; padding: 20px; background: #f9fafb; border-radius: 8px; }
+          .total-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+          .total-row.final { border-top: 2px solid #e5e7eb; margin-top: 10px; padding-top: 16px; font-size: 18px; font-weight: 700; }
+          .footer { margin-top: 60px; text-align: center; font-size: 12px; color: #666; }
+          @media print { body { padding: 20px; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">Nubo</div>
+          <div class="invoice-title">
+            <h1>INVOICE</h1>
+            <div class="invoice-number">${inv.invoiceNumber}</div>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="meta-item">
+            <h3>Invoice Date</h3>
+            <p>${formatDate(inv.createdAt)}</p>
+          </div>
+          <div class="meta-item">
+            <h3>Due Date</h3>
+            <p>${formatDate(inv.dueDate)}</p>
+          </div>
+          <div class="meta-item">
+            <h3>Status</h3>
+            <span class="status status-${inv.status}">${statusLabel}</span>
+          </div>
+        </div>
+        <div class="totals">
+          <div class="total-row">
+            <span>Subtotal</span>
+            <span>${formatCurrency(inv.subtotal || '0', inv.currency)}</span>
+          </div>
+          <div class="total-row">
+            <span>GST (${inv.gstPercentage || '18'}%)</span>
+            <span>${formatCurrency(inv.gstAmount || '0', inv.currency)}</span>
+          </div>
+          <div class="total-row final">
+            <span>Total Amount</span>
+            <span>${formatCurrency(inv.totalAmount || '0', inv.currency)}</span>
+          </div>
+        </div>
+        <div class="footer">
+          <p>Thank you for your business!</p>
+          <p style="margin-top: 8px;">Nubo Email • nubo.email</p>
+        </div>
+        <script>
+          window.onload = function() {
+            window.print();
+          }
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   return (
@@ -234,7 +320,11 @@ export default function PartnerInvoicesPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDownloadPDF(invoice)}
+                          >
                             <Download className="h-4 w-4" />
                           </Button>
                         </div>
@@ -302,71 +392,33 @@ export default function PartnerInvoicesPage() {
                 <div>{getStatusBadge(selectedInvoice.status)}</div>
               </div>
 
-              {/* Line Items */}
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="text-left px-4 py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        Description
-                      </th>
-                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        Qty
-                      </th>
-                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        Unit Price
-                      </th>
-                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        Total
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {selectedInvoice.lineItems?.map((item) => (
-                      <tr key={item.description}>
-                        <td className="px-4 py-3 text-gray-900 dark:text-white">
-                          {item.description}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-300">
-                          {item.quantity}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-300">
-                          {formatCurrency(item.unitPrice, selectedInvoice.currency)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-white">
-                          {formatCurrency(item.totalPrice, selectedInvoice.currency)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
               {/* Totals */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
                   <span className="text-gray-900 dark:text-white">
-                    {formatCurrency(selectedInvoice.subtotal, selectedInvoice.currency)}
+                    {formatCurrency(selectedInvoice.subtotal || '0', selectedInvoice.currency)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">GST (18%)</span>
+                  <span className="text-gray-500 dark:text-gray-400">
+                    GST ({selectedInvoice.gstPercentage || '18'}%)
+                  </span>
                   <span className="text-gray-900 dark:text-white">
-                    {formatCurrency(selectedInvoice.taxAmount, selectedInvoice.currency)}
+                    {formatCurrency(selectedInvoice.gstAmount || '0', selectedInvoice.currency)}
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-600">
                   <span className="font-medium text-gray-900 dark:text-white">Total</span>
                   <span className="font-bold text-xl text-gray-900 dark:text-white">
-                    {formatCurrency(selectedInvoice.totalAmount, selectedInvoice.currency)}
+                    {formatCurrency(selectedInvoice.totalAmount || '0', selectedInvoice.currency)}
                   </span>
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex justify-end gap-3">
-                <Button variant="outline">
+                <Button variant="outline" onClick={() => handleDownloadPDF(selectedInvoice)}>
                   <Download className="h-4 w-4 mr-2" />
                   Download PDF
                 </Button>

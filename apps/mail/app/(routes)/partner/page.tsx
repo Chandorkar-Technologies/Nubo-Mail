@@ -1,3 +1,5 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {
@@ -212,16 +214,6 @@ export default function PartnerDashboard() {
               <div className="flex items-center gap-3">
                 <HardDrive className="h-5 w-5 text-gray-500" />
                 <span className="text-gray-700 dark:text-gray-300">Purchase Storage</span>
-              </div>
-              <ArrowUpRight className="h-4 w-4 text-gray-400" />
-            </Link>
-            <Link
-              to="/partner/pricing"
-              className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <TrendingUp className="h-5 w-5 text-gray-500" />
-                <span className="text-gray-700 dark:text-gray-300">View Pricing</span>
               </div>
               <ArrowUpRight className="h-4 w-4 text-gray-400" />
             </Link>

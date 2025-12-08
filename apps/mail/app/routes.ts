@@ -28,19 +28,26 @@ export default [
   layout('(routes)/admin/layout.tsx', [
     route('/admin', '(routes)/admin/page.tsx'),
     route('/admin/partners', '(routes)/admin/partners/page.tsx'),
+    route('/admin/partners/:id', '(routes)/admin/partners/$id/page.tsx'),
+    route('/admin/organizations', '(routes)/admin/organizations/page.tsx'),
     route('/admin/approvals', '(routes)/admin/approvals/page.tsx'),
+    route('/admin/pricing', '(routes)/admin/pricing/page.tsx'),
+    route('/admin/invoices', '(routes)/admin/invoices/page.tsx'),
+    route('/admin/settings', '(routes)/admin/settings/page.tsx'),
   ]),
 
-  // B2B Partner Dashboard
+  // B2B Partner Application (outside layout - no auth required)
+  route('/partner/apply', '(routes)/partner/apply/page.tsx'),
+
+  // B2B Partner Dashboard (requires partner auth)
   layout('(routes)/partner/layout.tsx', [
     route('/partner', '(routes)/partner/page.tsx'),
     route('/partner/organizations', '(routes)/partner/organizations/page.tsx'),
     route('/partner/organizations/new', '(routes)/partner/organizations/new/page.tsx'),
+    route('/partner/organizations/:id', '(routes)/partner/organizations/$id/page.tsx'),
     route('/partner/storage', '(routes)/partner/storage/page.tsx'),
     route('/partner/invoices', '(routes)/partner/invoices/page.tsx'),
-    route('/partner/pricing', '(routes)/partner/pricing/page.tsx'),
     route('/partner/settings', '(routes)/partner/settings/page.tsx'),
-    route('/partner/apply', '(routes)/partner/apply/page.tsx'),
   ]),
 
   // B2B Workspace Dashboard

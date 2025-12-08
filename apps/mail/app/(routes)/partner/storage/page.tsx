@@ -1,9 +1,10 @@
+'use client';
+
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {
   HardDrive,
   Plus,
-  Building2,
   TrendingUp,
   ShoppingCart,
   Check,
@@ -19,67 +20,100 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 interface StorageStats {
   allocatedBytes: number;
   usedBytes: number;
   availableBytes: number;
   percentage: number;
-  organizationBreakdown: Array<{
-    id: string;
-    name: string;
-    allocatedBytes: number;
-    usedBytes: number;
-  }>;
 }
 
-interface PricingTier {
+interface PlanVariant {
   id: string;
-  sizeGB: number;
-  priceINR: number;
-  discountedPrice: number;
-  popular?: boolean;
+  name: string;
+  displayName: string;
+  storageBytes: number;
+  retailPriceMonthly: string;
+  retailPriceYearly: string;
+  partnerPriceMonthly: string;
+  partnerPriceYearly: string;
 }
 
 export default function PartnerStoragePage() {
   const [stats, setStats] = useState<StorageStats | null>(null);
-  const [pricing, setPricing] = useState<PricingTier[]>([]);
+  const [storageVariants, setStorageVariants] = useState<PlanVariant[]>([]);
+  const [tierDiscount, setTierDiscount] = useState(20);
   const [loading, setLoading] = useState(true);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
-  const [selectedTier, setSelectedTier] = useState<PricingTier | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<PlanVariant | null>(null);
   const [purchasing, setPurchasing] = useState(false);
+  const [isYearly, setIsYearly] = useState(false);
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [partnerName, setPartnerName] = useState<string>('');
+  const [partnerEmail, setPartnerEmail] = useState<string>('');
 
   useEffect(() => {
+    // Load Razorpay script
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    document.body.appendChild(script);
+
     const fetchData = async () => {
       try {
-        const [statsData] = await Promise.all([
-          // Mock storage stats until we add the endpoint
-          Promise.resolve({
-            allocatedBytes: 100 * 1024 * 1024 * 1024, // 100 GB
-            usedBytes: 45 * 1024 * 1024 * 1024, // 45 GB
-            availableBytes: 55 * 1024 * 1024 * 1024, // 55 GB
-            percentage: 45,
-            organizationBreakdown: [],
-          }),
+        const [dashboardStats, pricingData, partnerProfile] = await Promise.all([
           api.partner.getDashboardStats.query(),
+          api.partner.getPricing.query(),
+          api.partner.getPartnerProfile.query(),
         ]);
-        setStats(statsData);
 
-        // Mock pricing tiers
-        setPricing([
-          { id: '1', sizeGB: 50, priceINR: 5000, discountedPrice: 4000 },
-          { id: '2', sizeGB: 100, priceINR: 9000, discountedPrice: 7200, popular: true },
-          { id: '3', sizeGB: 250, priceINR: 20000, discountedPrice: 16000 },
-          { id: '4', sizeGB: 500, priceINR: 35000, discountedPrice: 28000 },
-          { id: '5', sizeGB: 1000, priceINR: 60000, discountedPrice: 48000 },
-        ]);
+        // Set partner info
+        setPartnerId(partnerProfile.partner.id);
+        setPartnerName(partnerProfile.partner.companyName);
+        setPartnerEmail(partnerProfile.partner.contactEmail);
+
+        // Set storage stats from dashboard
+        const allocated = dashboardStats.storage.allocated;
+        const used = dashboardStats.storage.used;
+        setStats({
+          allocatedBytes: allocated,
+          usedBytes: used,
+          availableBytes: allocated - used,
+          percentage: dashboardStats.storage.percentage,
+        });
+
+        // Get storage variants from unlimited_user category (storage pool plans)
+        const unlimitedCategory = pricingData.categories.find(
+          (c: { name: string }) => c.name === 'unlimited_user'
+        );
+        if (unlimitedCategory) {
+          setStorageVariants(unlimitedCategory.variants);
+        }
+        setTierDiscount(pricingData.tierDiscount);
       } catch (error) {
         console.error('Failed to fetch storage data:', error);
+        toast.error('Failed to load storage data');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
+
+    return () => {
+      // Cleanup script on unmount
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+    };
   }, []);
 
   const formatBytes = (bytes: number): string => {
@@ -98,19 +132,95 @@ export default function PartnerStoragePage() {
     }).format(amount);
   };
 
+  const getPrice = (variant: PlanVariant) => {
+    return isYearly
+      ? Number(variant.partnerPriceYearly)
+      : Number(variant.partnerPriceMonthly);
+  };
+
+  const getRetailPrice = (variant: PlanVariant) => {
+    return isYearly
+      ? Number(variant.retailPriceYearly)
+      : Number(variant.retailPriceMonthly);
+  };
+
   const handlePurchase = async () => {
-    if (!selectedTier) return;
+    if (!selectedVariant || !partnerId) return;
     setPurchasing(true);
+
     try {
-      await api.partner.requestStoragePurchase.mutate({
-        storageBytesRequested: selectedTier.sizeGB * 1024 * 1024 * 1024,
+      // Calculate storage in GB
+      const storageSizeGB = selectedVariant.storageBytes / (1024 * 1024 * 1024);
+      const priceINR = getPrice(selectedVariant);
+
+      // Create Razorpay order
+      const orderData = await api.razorpayB2B.createStorageOrder.mutate({
+        partnerId,
+        storageSizeGB,
+        priceINR,
       });
-      toast.success('Storage purchase request submitted');
-      setPurchaseDialogOpen(false);
-      setSelectedTier(null);
+
+      // Open Razorpay checkout
+      const options = {
+        key: orderData.keyId,
+        amount: Math.round(orderData.amount * 100),
+        currency: orderData.currency,
+        name: 'Nubo',
+        description: `Storage Pool - ${selectedVariant.displayName}`,
+        order_id: orderData.orderId,
+        prefill: {
+          name: partnerName,
+          email: partnerEmail,
+        },
+        theme: {
+          color: '#16a34a',
+        },
+        handler: async (response: {
+          razorpay_payment_id: string;
+          razorpay_order_id: string;
+          razorpay_signature: string;
+        }) => {
+          try {
+            // Verify payment
+            await api.razorpayB2B.verifyPayment.mutate({
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+              invoiceId: orderData.invoiceId,
+            });
+
+            toast.success('Payment successful! Storage has been added to your pool.');
+            setPurchaseDialogOpen(false);
+            setSelectedVariant(null);
+
+            // Refresh storage stats
+            const dashboardStats = await api.partner.getDashboardStats.query();
+            const allocated = dashboardStats.storage.allocated;
+            const used = dashboardStats.storage.used;
+            setStats({
+              allocatedBytes: allocated,
+              usedBytes: used,
+              availableBytes: allocated - used,
+              percentage: dashboardStats.storage.percentage,
+            });
+          } catch (error: any) {
+            console.error('Payment verification failed:', error);
+            toast.error(error.message || 'Payment verification failed');
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setPurchasing(false);
+            toast.info('Payment cancelled');
+          },
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
     } catch (error: any) {
-      console.error('Failed to purchase storage:', error);
-      toast.error(error.message || 'Failed to process purchase');
+      console.error('Failed to create order:', error);
+      toast.error(error.message || 'Failed to create payment order');
     } finally {
       setPurchasing(false);
     }
@@ -219,26 +329,62 @@ export default function PartnerStoragePage() {
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             Purchase Storage
           </h2>
-          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-            <TrendingUp className="h-4 w-4" />
-            <span>Partner discount applied</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <TrendingUp className="h-4 w-4" />
+              <span>{tierDiscount}% Partner discount</span>
+            </div>
+            <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <Label
+                htmlFor="billing-toggle"
+                className={cn(
+                  'px-3 py-1 rounded-md text-sm cursor-pointer transition-colors',
+                  !isYearly
+                    ? 'bg-white dark:bg-gray-800 shadow text-gray-900 dark:text-white'
+                    : 'text-gray-500 dark:text-gray-400'
+                )}
+                onClick={() => setIsYearly(false)}
+              >
+                Monthly
+              </Label>
+              <Switch
+                id="billing-toggle"
+                checked={isYearly}
+                onCheckedChange={setIsYearly}
+                className="data-[state=checked]:bg-green-600"
+              />
+              <Label
+                htmlFor="billing-toggle"
+                className={cn(
+                  'px-3 py-1 rounded-md text-sm cursor-pointer transition-colors',
+                  isYearly
+                    ? 'bg-white dark:bg-gray-800 shadow text-gray-900 dark:text-white'
+                    : 'text-gray-500 dark:text-gray-400'
+                )}
+                onClick={() => setIsYearly(true)}
+              >
+                Yearly
+              </Label>
+            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {pricing.map((tier) => (
+          {storageVariants.map((variant, index) => {
+            const isPopular = index === Math.floor(storageVariants.length / 2);
+            return (
             <div
-              key={tier.id}
+              key={variant.id}
               className={cn(
                 'relative bg-white dark:bg-gray-800 rounded-xl shadow-sm border p-6 transition-all cursor-pointer hover:shadow-md',
-                tier.popular
+                isPopular
                   ? 'border-green-500 ring-2 ring-green-500'
                   : 'border-gray-200 dark:border-gray-700',
-                selectedTier?.id === tier.id && 'ring-2 ring-green-500'
+                selectedVariant?.id === variant.id && 'ring-2 ring-green-500'
               )}
-              onClick={() => setSelectedTier(tier)}
+              onClick={() => setSelectedVariant(variant)}
             >
-              {tier.popular && (
+              {isPopular && (
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-green-500 text-white text-xs font-medium rounded-full">
                   Popular
                 </span>
@@ -246,17 +392,19 @@ export default function PartnerStoragePage() {
               <div className="text-center">
                 <HardDrive className="h-8 w-8 text-purple-500 mx-auto mb-3" />
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-                  {tier.sizeGB >= 1000 ? `${tier.sizeGB / 1000} TB` : `${tier.sizeGB} GB`}
+                  {variant.displayName}
                 </h3>
                 <p className="text-sm text-gray-400 line-through mb-1">
-                  {formatCurrency(tier.priceINR)}
+                  {formatCurrency(getRetailPrice(variant))}
                 </p>
                 <p className="text-xl font-semibold text-green-600 dark:text-green-400">
-                  {formatCurrency(tier.discountedPrice)}
+                  {formatCurrency(getPrice(variant))}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">one-time</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  per {isYearly ? 'year' : 'month'}
+                </p>
               </div>
-              {selectedTier?.id === tier.id && (
+              {selectedVariant?.id === variant.id && (
                 <div className="absolute top-2 right-2">
                   <div className="h-6 w-6 bg-green-500 rounded-full flex items-center justify-center">
                     <Check className="h-4 w-4 text-white" />
@@ -264,62 +412,28 @@ export default function PartnerStoragePage() {
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
 
-        {selectedTier && (
+        {storageVariants.length === 0 && (
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            No storage plans available
+          </div>
+        )}
+
+        {selectedVariant && (
           <div className="mt-4 flex justify-end">
             <Button
               onClick={() => setPurchaseDialogOpen(true)}
               className="bg-green-600 hover:bg-green-700"
             >
               <ShoppingCart className="h-4 w-4 mr-2" />
-              Purchase {selectedTier.sizeGB >= 1000 ? `${selectedTier.sizeGB / 1000} TB` : `${selectedTier.sizeGB} GB`} for {formatCurrency(selectedTier.discountedPrice)}
+              Purchase {selectedVariant.displayName} for {formatCurrency(getPrice(selectedVariant))}/{isYearly ? 'yr' : 'mo'}
             </Button>
           </div>
         )}
       </div>
-
-      {/* Organization Breakdown */}
-      {stats?.organizationBreakdown && stats.organizationBreakdown.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Storage by Organization
-          </h2>
-          <div className="space-y-4">
-            {stats.organizationBreakdown.map((org) => {
-              const percentage =
-                org.allocatedBytes > 0
-                  ? (org.usedBytes / org.allocatedBytes) * 100
-                  : 0;
-
-              return (
-                <div key={org.id} className="flex items-center gap-4">
-                  <div className="h-10 w-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                    <Building2 className="h-5 w-5 text-gray-500" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        {org.name}
-                      </span>
-                      <span className="text-sm text-gray-500 dark:text-gray-400">
-                        {formatBytes(org.usedBytes)} / {formatBytes(org.allocatedBytes)}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div
-                        className="bg-purple-500 h-2 rounded-full transition-all"
-                        style={{ width: `${Math.min(percentage, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Purchase Confirmation Dialog */}
       <Dialog open={purchaseDialogOpen} onOpenChange={setPurchaseDialogOpen}>
@@ -330,33 +444,37 @@ export default function PartnerStoragePage() {
               You are about to purchase additional storage for your partner account.
             </DialogDescription>
           </DialogHeader>
-          {selectedTier && (
+          {selectedVariant && (
             <div className="py-4">
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Storage</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    {selectedTier.sizeGB >= 1000
-                      ? `${selectedTier.sizeGB / 1000} TB`
-                      : `${selectedTier.sizeGB} GB`}
+                    {selectedVariant.displayName}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Original Price</span>
+                  <span className="text-gray-500 dark:text-gray-400">Billing</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {isYearly ? 'Yearly' : 'Monthly'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">Retail Price</span>
                   <span className="text-gray-400 line-through">
-                    {formatCurrency(selectedTier.priceINR)}
+                    {formatCurrency(getRetailPrice(selectedVariant))}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Partner Discount</span>
+                  <span className="text-gray-500 dark:text-gray-400">Partner Discount ({tierDiscount}%)</span>
                   <span className="text-green-600 dark:text-green-400">
-                    -{formatCurrency(selectedTier.priceINR - selectedTier.discountedPrice)}
+                    -{formatCurrency(getRetailPrice(selectedVariant) - getPrice(selectedVariant))}
                   </span>
                 </div>
                 <div className="border-t border-gray-200 dark:border-gray-600 pt-3 flex justify-between">
                   <span className="font-medium text-gray-900 dark:text-white">Total</span>
                   <span className="font-bold text-xl text-gray-900 dark:text-white">
-                    {formatCurrency(selectedTier.discountedPrice)}
+                    {formatCurrency(getPrice(selectedVariant))}/{isYearly ? 'yr' : 'mo'}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">

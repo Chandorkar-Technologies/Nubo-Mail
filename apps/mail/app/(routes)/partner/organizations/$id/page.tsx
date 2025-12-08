@@ -1,0 +1,1166 @@
+'use client';
+
+import { api } from '@/lib/trpc';
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import {
+  ArrowLeft,
+  Users,
+  Globe,
+  HardDrive,
+  Trash2,
+  Plus,
+  Mail,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  AlertTriangle,
+  Info,
+  ExternalLink,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+
+interface OrganizationDetail {
+  id: string;
+  name: string;
+  billingEmail: string | null;
+  billingAddress: string | null;
+  gstNumber: string | null;
+  totalStorageBytes: number;
+  usedStorageBytes: number;
+  isActive: boolean;
+  suspendedAt: string | null;
+  suspensionReason: string | null;
+  createdAt: string;
+  hybridMailEnabled?: boolean;
+  hybridMailProvider?: string | null;
+}
+
+interface Domain {
+  id: string;
+  domainName: string;
+  isPrimary: boolean;
+  dnsVerified: boolean;
+  mxRecord: string | null;
+  spfRecord: string | null;
+  dkimRecord: string | null;
+  dkimSelector: string | null;
+  dmarcRecord: string | null;
+  status: 'pending' | 'dns_pending' | 'active' | 'suspended';
+  createdAt: string;
+}
+
+interface OrganizationUser {
+  id: string;
+  emailAddress: string;
+  displayName: string | null;
+  domainId: string;
+  mailboxStorageBytes: number;
+  mailboxUsedBytes: number;
+  driveStorageBytes: number;
+  driveUsedBytes: number;
+  status: 'pending' | 'active' | 'suspended';
+  hasProSubscription: boolean;
+  createdAt: string;
+}
+
+export default function OrganizationDetailPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [organization, setOrganization] = useState<OrganizationDetail | null>(null);
+  const [domains, setDomains] = useState<Domain[]>([]);
+  const [users, setUsers] = useState<OrganizationUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [partnerAvailableStorage, setPartnerAvailableStorage] = useState(0);
+
+  // Delete organization dialog
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Add domain dialog
+  const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
+  const [newDomainName, setNewDomainName] = useState('');
+  const [addingDomain, setAddingDomain] = useState(false);
+
+  // Domain detail expansion
+  const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+
+  // Delete domain dialog
+  const [deleteDomainDialogOpen, setDeleteDomainDialogOpen] = useState(false);
+  const [domainToDelete, setDomainToDelete] = useState<Domain | null>(null);
+  const [deletingDomain, setDeletingDomain] = useState(false);
+
+  // Add user dialog
+  const [addUserDialogOpen, setAddUserDialogOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserDisplayName, setNewUserDisplayName] = useState('');
+  const [newUserDomainId, setNewUserDomainId] = useState('');
+  const [newUserMailboxStorage, setNewUserMailboxStorage] = useState(5); // GB
+  const [newUserDriveStorage, setNewUserDriveStorage] = useState(5); // GB
+  const [addingUser, setAddingUser] = useState(false);
+
+  // Delete user dialog
+  const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<OrganizationUser | null>(null);
+  const [deletingUser, setDeletingUser] = useState(false);
+
+  // Edit storage dialog
+  const [editStorageDialogOpen, setEditStorageDialogOpen] = useState(false);
+  const [newStorageGB, setNewStorageGB] = useState(0);
+  const [updatingStorage, setUpdatingStorage] = useState(false);
+
+  // Edit billing dialog
+  const [editBillingDialogOpen, setEditBillingDialogOpen] = useState(false);
+  const [billingForm, setBillingForm] = useState({
+    billingEmail: '',
+    billingAddress: '',
+    gstNumber: '',
+  });
+  const [updatingBilling, setUpdatingBilling] = useState(false);
+
+  // Hybrid mail toggle
+  const [updatingHybridMail, setUpdatingHybridMail] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const [orgData, statsData] = await Promise.all([
+        api.partner.getOrganizationById.query({ organizationId: id }),
+        api.partner.getDashboardStats.query(),
+      ]);
+      setOrganization(orgData.organization);
+      setDomains(orgData.domains || []);
+      setUsers(orgData.users || []);
+      setPartnerAvailableStorage(statsData.storage.allocated - statsData.storage.used);
+    } catch (error) {
+      console.error('Failed to fetch organization:', error);
+      toast.error('Failed to load organization details');
+      navigate('/partner/organizations');
+    } finally {
+      setLoading(false);
+    }
+  }, [id, navigate]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const formatBytes = (bytes: number): string => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const bytesToGB = (bytes: number): number => {
+    return Math.round((bytes / (1024 * 1024 * 1024)) * 100) / 100;
+  };
+
+  const gbToBytes = (gb: number): number => {
+    return gb * 1024 * 1024 * 1024;
+  };
+
+  const getStoragePercentage = (used: number, total: number) => {
+    if (!total) return 0;
+    return Math.min((used / total) * 100, 100);
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard');
+    } catch {
+      toast.error('Failed to copy');
+    }
+  };
+
+  // =============== Organization Actions ===============
+
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await api.partner.deleteOrganization.mutate({ organizationId: id });
+      toast.success('Organization deleted successfully');
+      navigate('/partner/organizations');
+    } catch (error: any) {
+      console.error('Failed to delete organization:', error);
+      toast.error(error.message || 'Failed to delete organization');
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleUpdateStorage = async () => {
+    if (!id || !organization) return;
+    const newStorageBytes = gbToBytes(newStorageGB);
+    const currentStorageBytes = organization.totalStorageBytes;
+    const difference = newStorageBytes - currentStorageBytes;
+
+    // Check if we have enough storage in pool
+    if (difference > 0 && difference > partnerAvailableStorage + currentStorageBytes) {
+      toast.error('Insufficient storage in your pool');
+      return;
+    }
+
+    setUpdatingStorage(true);
+    try {
+      await api.partner.updateOrganization.mutate({
+        organizationId: id,
+        totalStorageBytes: newStorageBytes,
+      });
+      toast.success('Storage updated successfully');
+      setEditStorageDialogOpen(false);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update storage');
+    } finally {
+      setUpdatingStorage(false);
+    }
+  };
+
+  const handleUpdateBilling = async () => {
+    if (!id) return;
+    setUpdatingBilling(true);
+    try {
+      await api.partner.updateOrganization.mutate({
+        organizationId: id,
+        billingEmail: billingForm.billingEmail || undefined,
+        billingAddress: billingForm.billingAddress || undefined,
+        gstNumber: billingForm.gstNumber || undefined,
+      });
+      toast.success('Billing information updated');
+      setEditBillingDialogOpen(false);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update billing information');
+    } finally {
+      setUpdatingBilling(false);
+    }
+  };
+
+  const handleToggleHybridMail = async (enabled: boolean) => {
+    if (!id) return;
+    setUpdatingHybridMail(true);
+    try {
+      await api.partner.updateOrganization.mutate({
+        organizationId: id,
+        hybridMailEnabled: enabled,
+      });
+      setOrganization((prev) => (prev ? { ...prev, hybridMailEnabled: enabled } : null));
+      toast.success(enabled ? 'Hybrid mail enabled' : 'Hybrid mail disabled');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update hybrid mail setting');
+    } finally {
+      setUpdatingHybridMail(false);
+    }
+  };
+
+  // =============== Domain Actions ===============
+
+  const handleAddDomain = async () => {
+    if (!id || !newDomainName.trim()) return;
+    setAddingDomain(true);
+    try {
+      await api.partner.createDomain.mutate({
+        organizationId: id,
+        domainName: newDomainName.trim().toLowerCase(),
+      });
+      toast.success('Domain added successfully');
+      setAddDomainDialogOpen(false);
+      setNewDomainName('');
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add domain');
+    } finally {
+      setAddingDomain(false);
+    }
+  };
+
+  const handleDeleteDomain = async () => {
+    if (!domainToDelete) return;
+    setDeletingDomain(true);
+    try {
+      await api.partner.deleteDomain.mutate({ domainId: domainToDelete.id });
+      toast.success('Domain deleted successfully');
+      setDeleteDomainDialogOpen(false);
+      setDomainToDelete(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete domain');
+    } finally {
+      setDeletingDomain(false);
+    }
+  };
+
+  // =============== User Actions ===============
+
+  const handleAddUser = async () => {
+    if (!id || !newUserEmail.trim() || !newUserDomainId) return;
+
+    const selectedDomain = domains.find((d) => d.id === newUserDomainId);
+    if (!selectedDomain) {
+      toast.error('Please select a domain');
+      return;
+    }
+
+    const emailLocal = newUserEmail.trim().toLowerCase();
+    const fullEmail = `${emailLocal}@${selectedDomain.domainName}`;
+    const totalUserStorage = gbToBytes(newUserMailboxStorage + newUserDriveStorage);
+
+    // Check if we have enough storage
+    if (organization && totalUserStorage > organization.totalStorageBytes - organization.usedStorageBytes) {
+      toast.error('Insufficient storage allocated to this organization');
+      return;
+    }
+
+    setAddingUser(true);
+    try {
+      await api.partner.createUser.mutate({
+        organizationId: id,
+        domainId: newUserDomainId,
+        emailAddress: fullEmail,
+        displayName: newUserDisplayName.trim() || undefined,
+        mailboxStorageBytes: gbToBytes(newUserMailboxStorage),
+        driveStorageBytes: gbToBytes(newUserDriveStorage),
+      });
+      toast.success('User added successfully');
+      setAddUserDialogOpen(false);
+      setNewUserEmail('');
+      setNewUserDisplayName('');
+      setNewUserDomainId('');
+      setNewUserMailboxStorage(5);
+      setNewUserDriveStorage(5);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add user');
+    } finally {
+      setAddingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    setDeletingUser(true);
+    try {
+      await api.partner.deleteUser.mutate({ userId: userToDelete.id });
+      toast.success('User deleted successfully');
+      setDeleteUserDialogOpen(false);
+      setUserToDelete(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete user');
+    } finally {
+      setDeletingUser(false);
+    }
+  };
+
+  // =============== Render ===============
+
+  if (loading) {
+    return (
+      <div className="p-8">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
+          <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-xl"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!organization) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-gray-500 dark:text-gray-400">Organization not found</p>
+      </div>
+    );
+  }
+
+  const storagePercentage = getStoragePercentage(
+    organization.usedStorageBytes,
+    organization.totalStorageBytes
+  );
+
+  const getStatusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+      pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+      dns_pending: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+      suspended: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    };
+    return styles[status] || styles.pending;
+  };
+
+  return (
+    <div className="p-8">
+      {/* Header */}
+      <div className="mb-8">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate('/partner/organizations')}
+          className="mb-4"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Organizations
+        </Button>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-xl bg-green-100 dark:bg-green-900 flex items-center justify-center">
+              <span className="text-2xl font-bold text-green-700 dark:text-green-300">
+                {organization.name.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                {organization.name}
+              </h1>
+              <p className="text-gray-500 dark:text-gray-400">
+                Created {new Date(organization.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Organization
+          </Button>
+        </div>
+      </div>
+
+      {/* Status Badge */}
+      {!organization.isActive && (
+        <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-300 font-medium">
+            This organization is suspended
+          </p>
+          {organization.suspensionReason && (
+            <p className="text-red-600 dark:text-red-400 text-sm mt-1">
+              Reason: {organization.suspensionReason}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* Users */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <h3 className="font-medium text-gray-900 dark:text-white">Users</h3>
+          </div>
+          <p className="text-3xl font-bold text-gray-900 dark:text-white">{users.length}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Email accounts</p>
+        </div>
+
+        {/* Domains */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+              <Globe className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <h3 className="font-medium text-gray-900 dark:text-white">Domains</h3>
+          </div>
+          <p className="text-3xl font-bold text-gray-900 dark:text-white">{domains.length}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Connected domains</p>
+        </div>
+
+        {/* Storage */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                <HardDrive className="h-5 w-5 text-green-600 dark:text-green-400" />
+              </div>
+              <h3 className="font-medium text-gray-900 dark:text-white">Storage</h3>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setNewStorageGB(bytesToGB(organization.totalStorageBytes));
+                setEditStorageDialogOpen(true);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-3xl font-bold text-gray-900 dark:text-white">
+            {formatBytes(organization.usedStorageBytes)}
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            of {formatBytes(organization.totalStorageBytes)} allocated
+          </p>
+          <div className="mt-3 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div
+              className={cn(
+                'h-2 rounded-full transition-all',
+                storagePercentage > 90
+                  ? 'bg-red-500'
+                  : storagePercentage > 70
+                    ? 'bg-yellow-500'
+                    : 'bg-green-500'
+              )}
+              style={{ width: `${storagePercentage}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Hybrid Mail Option */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="p-2 bg-orange-100 dark:bg-orange-900 rounded-lg">
+              <ExternalLink className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div>
+              <h3 className="font-medium text-gray-900 dark:text-white">Hybrid Mail Solution</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Keep some emails on Google Workspace or Office 365, and remaining on Nubo
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={organization.hybridMailEnabled || false}
+            onCheckedChange={handleToggleHybridMail}
+            disabled={updatingHybridMail}
+          />
+        </div>
+        {organization.hybridMailEnabled && (
+          <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+            <div className="flex items-start gap-2">
+              <Info className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5" />
+              <p className="text-sm text-orange-700 dark:text-orange-300">
+                When adding users, you can choose whether their mailbox should be on Nubo or an
+                external provider (Google Workspace / Office 365). Configure external IMAP/SMTP
+                settings per user.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Domains Section */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Domains</h3>
+          <Button onClick={() => setAddDomainDialogOpen(true)} size="sm">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Domain
+          </Button>
+        </div>
+        {domains.length === 0 ? (
+          <div className="text-center py-8">
+            <Globe className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+            <p className="text-gray-500 dark:text-gray-400 mb-4">No domains configured yet</p>
+            <Button onClick={() => setAddDomainDialogOpen(true)} variant="outline">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Your First Domain
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {domains.map((domain) => (
+              <div key={domain.id} className="border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div
+                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                  onClick={() => setExpandedDomain(expandedDomain === domain.id ? null : domain.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <Mail className="h-5 w-5 text-gray-400" />
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {domain.domainName}
+                    </span>
+                    {domain.isPrimary && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={cn('px-2 py-1 rounded text-xs font-medium', getStatusBadge(domain.status))}>
+                      {domain.status === 'dns_pending' ? 'DNS Pending' : domain.status.charAt(0).toUpperCase() + domain.status.slice(1)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:text-red-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDomainToDelete(domain);
+                        setDeleteDomainDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    {expandedDomain === domain.id ? (
+                      <ChevronUp className="h-5 w-5 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 text-gray-400" />
+                    )}
+                  </div>
+                </div>
+
+                {expandedDomain === domain.id && (
+                  <div className="px-4 pb-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="mt-4 space-y-4">
+                      <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-blue-700 dark:text-blue-300">
+                          Configure the following DNS records with your domain provider to verify ownership and enable email delivery.
+                        </p>
+                      </div>
+
+                      {/* MX Record */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">MX Record</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(domain.mxRecord || 'mail.nubo.email')}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border">
+                          {domain.mxRecord || 'mail.nubo.email (Priority: 10)'}
+                        </code>
+                      </div>
+
+                      {/* SPF Record */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SPF Record (TXT)</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(domain.spfRecord || 'v=spf1 include:nubo.email ~all')}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
+                          {domain.spfRecord || 'v=spf1 include:nubo.email ~all'}
+                        </code>
+                      </div>
+
+                      {/* DKIM Record */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            DKIM Record (TXT) - {domain.dkimSelector || 'nubo'}._domainkey
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(domain.dkimRecord || 'Contact admin for DKIM key')}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
+                          {domain.dkimRecord || 'Contact admin for DKIM key'}
+                        </code>
+                      </div>
+
+                      {/* DMARC Record */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">DMARC Record (TXT) - _dmarc</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(domain.dmarcRecord || 'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email')}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
+                          {domain.dmarcRecord || 'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email'}
+                        </code>
+                      </div>
+
+                      {!domain.dnsVerified && (
+                        <div className="flex items-start gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                          <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                          <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                            DNS records are pending verification. Once you've added these records, our admin will verify and activate your domain.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Users/Email Accounts Section */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Email Accounts</h3>
+          <Button
+            onClick={() => setAddUserDialogOpen(true)}
+            size="sm"
+            disabled={domains.length === 0}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add User
+          </Button>
+        </div>
+        {users.length === 0 ? (
+          <div className="text-center py-8">
+            <Users className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+            <p className="text-gray-500 dark:text-gray-400 mb-4">No email accounts yet</p>
+            {domains.length === 0 ? (
+              <p className="text-sm text-gray-400 dark:text-gray-500">
+                Add a domain first to create email accounts
+              </p>
+            ) : (
+              <Button onClick={() => setAddUserDialogOpen(true)} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Add First User
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Email
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Display Name
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Storage
+                  </th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Status
+                  </th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => {
+                  const totalStorage = user.mailboxStorageBytes + user.driveStorageBytes;
+                  const usedStorage = user.mailboxUsedBytes + user.driveUsedBytes;
+                  return (
+                    <tr
+                      key={user.id}
+                      className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                    >
+                      <td className="py-3 px-4">
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {user.emailAddress}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 dark:text-gray-400">
+                        {user.displayName || '-'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {formatBytes(usedStorage)} / {formatBytes(totalStorage)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={cn('px-2 py-1 rounded text-xs font-medium', getStatusBadge(user.status))}>
+                          {user.status.charAt(0).toUpperCase() + user.status.slice(1)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={() => {
+                            setUserToDelete(user);
+                            setDeleteUserDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Billing Information */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Billing Information</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setBillingForm({
+                billingEmail: organization.billingEmail || '',
+                billingAddress: organization.billingAddress || '',
+                gstNumber: organization.gstNumber || '',
+              });
+              setEditBillingDialogOpen(true);
+            }}
+          >
+            <Pencil className="h-4 w-4 mr-2" />
+            Edit
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-gray-500 dark:text-gray-400">Billing Email</Label>
+            <p className="text-gray-900 dark:text-white">
+              {organization.billingEmail || 'Not set'}
+            </p>
+          </div>
+          <div>
+            <Label className="text-gray-500 dark:text-gray-400">GST Number</Label>
+            <p className="text-gray-900 dark:text-white">{organization.gstNumber || 'Not set'}</p>
+          </div>
+          <div className="md:col-span-2">
+            <Label className="text-gray-500 dark:text-gray-400">Billing Address</Label>
+            <p className="text-gray-900 dark:text-white whitespace-pre-wrap">
+              {organization.billingAddress || 'Not set'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ============ DIALOGS ============ */}
+
+      {/* Delete Organization Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{organization.name}</strong>? This action
+              cannot be undone. All users, domains, and data associated with this organization will
+              be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleting ? 'Deleting...' : 'Delete Organization'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Domain Dialog */}
+      <Dialog open={addDomainDialogOpen} onOpenChange={setAddDomainDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Domain</DialogTitle>
+            <DialogDescription>
+              Add a new domain to this organization. You'll need to configure DNS records after adding.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="domainName">Domain Name</Label>
+              <Input
+                id="domainName"
+                placeholder="example.com"
+                value={newDomainName}
+                onChange={(e) => setNewDomainName(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDomainDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddDomain} disabled={addingDomain || !newDomainName.trim()}>
+              {addingDomain ? 'Adding...' : 'Add Domain'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Domain Dialog */}
+      <AlertDialog open={deleteDomainDialogOpen} onOpenChange={setDeleteDomainDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Domain</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{domainToDelete?.domainName}</strong>? All
+              email accounts on this domain will be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteDomain}
+              disabled={deletingDomain}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deletingDomain ? 'Deleting...' : 'Delete Domain'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add User Dialog */}
+      <Dialog open={addUserDialogOpen} onOpenChange={setAddUserDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Email Account</DialogTitle>
+            <DialogDescription>Create a new email account for this organization.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Domain</Label>
+              <Select value={newUserDomainId} onValueChange={setNewUserDomainId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {domains.map((domain) => (
+                    <SelectItem key={domain.id} value={domain.id}>
+                      {domain.domainName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="userEmail">Email (local part)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="userEmail"
+                  placeholder="john.doe"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                />
+                <span className="text-gray-500 dark:text-gray-400">
+                  @{domains.find((d) => d.id === newUserDomainId)?.domainName || 'domain.com'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="displayName">Display Name (optional)</Label>
+              <Input
+                id="displayName"
+                placeholder="John Doe"
+                value={newUserDisplayName}
+                onChange={(e) => setNewUserDisplayName(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="mailboxStorage">Mailbox Storage (GB)</Label>
+                <Input
+                  id="mailboxStorage"
+                  type="number"
+                  min={1}
+                  value={newUserMailboxStorage}
+                  onChange={(e) => setNewUserMailboxStorage(Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="driveStorage">Drive Storage (GB)</Label>
+                <Input
+                  id="driveStorage"
+                  type="number"
+                  min={0}
+                  value={newUserDriveStorage}
+                  onChange={(e) => setNewUserDriveStorage(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Total: {newUserMailboxStorage + newUserDriveStorage} GB per user
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                Available in organization: {formatBytes(organization.totalStorageBytes - organization.usedStorageBytes)}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddUserDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddUser}
+              disabled={addingUser || !newUserEmail.trim() || !newUserDomainId}
+            >
+              {addingUser ? 'Adding...' : 'Add User'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Dialog */}
+      <AlertDialog open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Email Account</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{userToDelete?.emailAddress}</strong>? All
+              emails and data will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              disabled={deletingUser}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deletingUser ? 'Deleting...' : 'Delete User'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit Storage Dialog */}
+      <Dialog open={editStorageDialogOpen} onOpenChange={setEditStorageDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Storage Allocation</DialogTitle>
+            <DialogDescription>
+              Adjust the storage allocated to this organization from your partner pool.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="storageGB">Storage (GB)</Label>
+              <Input
+                id="storageGB"
+                type="number"
+                min={bytesToGB(organization.usedStorageBytes)}
+                value={newStorageGB}
+                onChange={(e) => setNewStorageGB(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                Currently used: {formatBytes(organization.usedStorageBytes)}
+              </p>
+            </div>
+            <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Available in your pool: {formatBytes(partnerAvailableStorage + organization.totalStorageBytes)}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditStorageDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateStorage} disabled={updatingStorage}>
+              {updatingStorage ? 'Updating...' : 'Update Storage'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Billing Dialog */}
+      <Dialog open={editBillingDialogOpen} onOpenChange={setEditBillingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Billing Information</DialogTitle>
+            <DialogDescription>Update the billing details for this organization.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="billingEmail">Billing Email</Label>
+              <Input
+                id="billingEmail"
+                type="email"
+                placeholder="billing@example.com"
+                value={billingForm.billingEmail}
+                onChange={(e) => setBillingForm({ ...billingForm, billingEmail: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="gstNumber">GST Number</Label>
+              <Input
+                id="gstNumber"
+                placeholder="22AAAAA0000A1Z5"
+                value={billingForm.gstNumber}
+                onChange={(e) => setBillingForm({ ...billingForm, gstNumber: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="billingAddress">Billing Address</Label>
+              <Textarea
+                id="billingAddress"
+                placeholder="123 Main St, City, State, PIN"
+                value={billingForm.billingAddress}
+                onChange={(e) => setBillingForm({ ...billingForm, billingAddress: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditBillingDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateBilling} disabled={updatingBilling}>
+              {updatingBilling ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

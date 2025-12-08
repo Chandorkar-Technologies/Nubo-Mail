@@ -27,7 +27,6 @@ import {
   planVariant,
   invoice,
   invoiceLineItem,
-  approvalRequest,
 } from '../../db/schema';
 
 // Partner middleware - checks if user is a partner
@@ -277,7 +276,7 @@ export const partnerRouter = router({
 
       const whereConditions = and(...conditions);
 
-      const [organizations, totalCount] = await Promise.all([
+      const [orgs, totalCount] = await Promise.all([
         db
           .select()
           .from(organization)
@@ -288,8 +287,35 @@ export const partnerRouter = router({
         db.select({ count: count() }).from(organization).where(whereConditions),
       ]);
 
+      // Fetch user and domain counts for each organization
+      const organizationsWithCounts = await Promise.all(
+        orgs.map(async (org) => {
+          const [userCountResult, domainCountResult] = await Promise.all([
+            db
+              .select({ count: count() })
+              .from(organizationUser)
+              .where(eq(organizationUser.organizationId, org.id)),
+            db
+              .select({ count: count() })
+              .from(organizationDomain)
+              .where(eq(organizationDomain.organizationId, org.id)),
+          ]);
+
+          return {
+            id: org.id,
+            name: org.name,
+            status: org.isActive ? 'active' : org.suspendedAt ? 'suspended' : 'inactive',
+            allocatedStorageBytes: Number(org.totalStorageBytes) || 0,
+            usedStorageBytes: Number(org.usedStorageBytes) || 0,
+            userCount: userCountResult[0]?.count ?? 0,
+            domainCount: domainCountResult[0]?.count ?? 0,
+            createdAt: org.createdAt?.toISOString() ?? new Date().toISOString(),
+          };
+        })
+      );
+
       return {
-        organizations,
+        organizations: organizationsWithCounts,
         total: totalCount[0]?.count ?? 0,
         page: input.page,
         limit: input.limit,
@@ -323,16 +349,18 @@ export const partnerRouter = router({
         .from(organizationDomain)
         .where(eq(organizationDomain.organizationId, input.organizationId));
 
-      // Get user count
-      const userCount = await db
-        .select({ count: count() })
+      // Get users
+      const users = await db
+        .select()
         .from(organizationUser)
-        .where(eq(organizationUser.organizationId, input.organizationId));
+        .where(eq(organizationUser.organizationId, input.organizationId))
+        .orderBy(desc(organizationUser.createdAt));
 
       return {
         organization: org[0],
         domains,
-        userCount: userCount[0]?.count ?? 0,
+        users,
+        userCount: users.length,
       };
     }),
 
@@ -403,6 +431,7 @@ export const partnerRouter = router({
         totalStorageBytes: z.number().optional(),
         isActive: z.boolean().optional(),
         suspensionReason: z.string().optional(),
+        hybridMailEnabled: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -470,6 +499,47 @@ export const partnerRouter = router({
       return { success: true };
     }),
 
+  deleteOrganization: partnerMiddleware
+    .input(z.object({ organizationId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, partner: partnerData } = ctx;
+
+      // Verify organization belongs to partner
+      const org = await db
+        .select()
+        .from(organization)
+        .where(
+          and(
+            eq(organization.id, input.organizationId),
+            eq(organization.partnerId, partnerData.id)
+          )
+        )
+        .limit(1);
+
+      if (!org.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+      }
+
+      const orgData = org[0];
+
+      // Return the storage to partner's pool
+      const storageToReturn = Number(orgData.totalStorageBytes) || 0;
+      if (storageToReturn > 0) {
+        await db
+          .update(partner)
+          .set({
+            usedStorageBytes: Math.max(0, Number(partnerData.usedStorageBytes) - storageToReturn),
+            updatedAt: new Date(),
+          })
+          .where(eq(partner.id, partnerData.id));
+      }
+
+      // Delete organization (cascade will handle related records)
+      await db.delete(organization).where(eq(organization.id, input.organizationId));
+
+      return { success: true };
+    }),
+
   // ======================= Domains =======================
 
   createDomain: partnerMiddleware
@@ -524,30 +594,13 @@ export const partnerRouter = router({
         organizationId: input.organizationId,
         domainName: input.domainName.toLowerCase(),
         isPrimary: input.isPrimary ?? false,
-        dnsVerified: false,
+        dnsVerified: true, // Auto-verified for now
         mxRecord,
         spfRecord,
         dkimRecord,
         dkimSelector,
         dmarcRecord,
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      // Create approval request
-      await db.insert(approvalRequest).values({
-        id: crypto.randomUUID(),
-        type: 'domain',
-        requestorType: 'partner',
-        requestorPartnerId: partnerData.id,
-        targetOrganizationId: input.organizationId,
-        targetDomainId: domainId,
-        requestData: {
-          domainName: input.domainName,
-          organizationName: org[0].name,
-        },
-        status: 'pending',
+        status: 'active', // Set to active immediately (no approval required)
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -698,14 +751,6 @@ export const partnerRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
       }
 
-      // Check domain is active
-      if (domain[0].status !== 'active') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Domain is not active. Please verify DNS first.',
-        });
-      }
-
       // Verify email matches domain
       const emailDomain = input.emailAddress.split('@')[1];
       if (emailDomain?.toLowerCase() !== domain[0].domainName.toLowerCase()) {
@@ -750,7 +795,7 @@ export const partnerRouter = router({
         displayName: input.displayName,
         mailboxStorageBytes: input.mailboxStorageBytes ?? 0,
         driveStorageBytes: input.driveStorageBytes ?? 0,
-        status: 'pending',
+        status: 'active', // Set to active immediately (no approval required)
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -766,25 +811,91 @@ export const partnerRouter = router({
           .where(eq(organization.id, input.organizationId));
       }
 
-      // Create approval request
-      await db.insert(approvalRequest).values({
-        id: crypto.randomUUID(),
-        type: 'user',
-        requestorType: 'partner',
-        requestorPartnerId: partnerData.id,
-        targetOrganizationId: input.organizationId,
-        targetUserId: userId,
-        requestData: {
-          emailAddress: input.emailAddress,
-          displayName: input.displayName,
-          organizationName: org[0].name,
-        },
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
       return { success: true, userId, nuboUsername };
+    }),
+
+  deleteUser: partnerMiddleware
+    .input(z.object({ userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, partner: partnerData } = ctx;
+
+      // Get user and verify organization belongs to partner
+      const userRecord = await db
+        .select()
+        .from(organizationUser)
+        .innerJoin(organization, eq(organizationUser.organizationId, organization.id))
+        .where(
+          and(
+            eq(organizationUser.id, input.userId),
+            eq(organization.partnerId, partnerData.id)
+          )
+        )
+        .limit(1);
+
+      if (!userRecord.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const userData = userRecord[0].organization_user;
+      const orgData = userRecord[0].organization;
+
+      // Return storage to organization pool
+      const userStorage = Number(userData.mailboxStorageBytes || 0) + Number(userData.driveStorageBytes || 0);
+      if (userStorage > 0) {
+        await db
+          .update(organization)
+          .set({
+            usedStorageBytes: Math.max(0, Number(orgData.usedStorageBytes) - userStorage),
+            updatedAt: new Date(),
+          })
+          .where(eq(organization.id, orgData.id));
+      }
+
+      // Delete user
+      await db.delete(organizationUser).where(eq(organizationUser.id, input.userId));
+
+      return { success: true };
+    }),
+
+  deleteDomain: partnerMiddleware
+    .input(z.object({ domainId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, partner: partnerData } = ctx;
+
+      // Get domain and verify organization belongs to partner
+      const domainRecord = await db
+        .select()
+        .from(organizationDomain)
+        .innerJoin(organization, eq(organizationDomain.organizationId, organization.id))
+        .where(
+          and(
+            eq(organizationDomain.id, input.domainId),
+            eq(organization.partnerId, partnerData.id)
+          )
+        )
+        .limit(1);
+
+      if (!domainRecord.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
+      }
+
+      // Check if there are users on this domain
+      const usersOnDomain = await db
+        .select({ count: count() })
+        .from(organizationUser)
+        .where(eq(organizationUser.domainId, input.domainId));
+
+      if ((usersOnDomain[0]?.count ?? 0) > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Cannot delete domain with existing users. Delete all users first.',
+        });
+      }
+
+      // Delete domain
+      await db.delete(organizationDomain).where(eq(organizationDomain.id, input.domainId));
+
+      return { success: true };
     }),
 
   // ======================= Storage Purchases =======================
