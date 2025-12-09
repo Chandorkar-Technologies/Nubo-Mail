@@ -2,7 +2,7 @@
 
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
-import { Building2, Search, Users, HardDrive, MoreVertical, Eye, Ban, CheckCircle, Pencil } from 'lucide-react';
+import { Building2, Search, Users, HardDrive, MoreVertical, Eye, Ban, CheckCircle, Pencil, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -51,10 +51,13 @@ export default function AdminOrganizationsPage() {
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
+  const [partnerDialogOpen, setPartnerDialogOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [orgDetails, setOrgDetails] = useState<any>(null);
   const [newStorageGB, setNewStorageGB] = useState('');
   const [suspensionReason, setSuspensionReason] = useState('');
+  const [partners, setPartners] = useState<Array<{ id: string; companyName: string }>>([]);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchOrganizations = async () => {
@@ -159,6 +162,41 @@ export default function AdminOrganizationsPage() {
     } catch (error) {
       console.error('Failed to activate organization:', error);
       toast.error('Failed to activate organization');
+    }
+  };
+
+  const handleOpenPartnerDialog = async (org: Organization) => {
+    setSelectedOrg(org);
+    setSelectedPartnerId(org.partnerId);
+    try {
+      const data = await api.admin.getPartners.query({});
+      setPartners(data.partners);
+      setPartnerDialogOpen(true);
+    } catch (error) {
+      console.error('Failed to fetch partners:', error);
+      toast.error('Failed to load partners');
+    }
+  };
+
+  const handleAssignPartner = async () => {
+    if (!selectedOrg) return;
+    try {
+      await api.admin.assignOrganizationToPartner.mutate({
+        organizationId: selectedOrg.id,
+        partnerId: selectedPartnerId,
+      });
+      setOrganizations((prev) =>
+        prev.map((org) =>
+          org.id === selectedOrg.id
+            ? { ...org, partnerId: selectedPartnerId }
+            : org
+        )
+      );
+      setPartnerDialogOpen(false);
+      toast.success(selectedPartnerId ? 'Partner assigned successfully' : 'Partner removed');
+    } catch (error) {
+      console.error('Failed to assign partner:', error);
+      toast.error('Failed to assign partner');
     }
   };
 
@@ -286,6 +324,10 @@ export default function AdminOrganizationsPage() {
                       <DropdownMenuItem onClick={() => handleOpenStorageDialog(org)}>
                         <Pencil className="mr-2 h-4 w-4" />
                         Manage Storage
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleOpenPartnerDialog(org)}>
+                        <UserPlus className="mr-2 h-4 w-4" />
+                        Assign Partner
                       </DropdownMenuItem>
                       {org.isActive ? (
                         <DropdownMenuItem
@@ -429,6 +471,44 @@ export default function AdminOrganizationsPage() {
             <Button variant="outline" onClick={() => setSuspendDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleSuspend}>
               Suspend Organization
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Partner Dialog */}
+      <Dialog open={partnerDialogOpen} onOpenChange={setPartnerDialogOpen}>
+        <DialogContent showOverlay>
+          <DialogHeader>
+            <DialogTitle>Assign Partner</DialogTitle>
+            <DialogDescription>
+              Assign {selectedOrg?.name} to a partner to manage.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Select Partner</Label>
+              <select
+                className="w-full mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white"
+                value={selectedPartnerId || ''}
+                onChange={(e) => setSelectedPartnerId(e.target.value || null)}
+              >
+                <option value="">No Partner (Retail)</option>
+                {partners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.companyName}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Assigning to a partner will allow them to manage this organization.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPartnerDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAssignPartner}>
+              {selectedPartnerId ? 'Assign Partner' : 'Remove Partner'}
             </Button>
           </DialogFooter>
         </DialogContent>

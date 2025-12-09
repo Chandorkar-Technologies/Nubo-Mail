@@ -661,6 +661,43 @@ export const adminRouter = router({
       return { success: true };
     }),
 
+  assignOrganizationToPartner: adminMiddleware
+    .input(z.object({
+      organizationId: z.string(),
+      partnerId: z.string().nullable()
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, permissions } = ctx;
+
+      if (!checkPermission(permissions, 'organizations:write')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Permission denied' });
+      }
+
+      // Verify partner exists if partnerId is provided
+      if (input.partnerId) {
+        const partnerExists = await db
+          .select({ id: partner.id })
+          .from(partner)
+          .where(eq(partner.id, input.partnerId))
+          .limit(1);
+
+        if (!partnerExists.length) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Partner not found' });
+        }
+      }
+
+      await db
+        .update(organization)
+        .set({
+          partnerId: input.partnerId,
+          isRetail: input.partnerId === null, // Mark as retail if no partner
+          updatedAt: new Date(),
+        })
+        .where(eq(organization.id, input.organizationId));
+
+      return { success: true };
+    }),
+
   suspendOrganization: adminMiddleware
     .input(z.object({ organizationId: z.string(), reason: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
