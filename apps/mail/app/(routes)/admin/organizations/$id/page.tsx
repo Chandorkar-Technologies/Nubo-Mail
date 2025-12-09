@@ -108,12 +108,20 @@ const statusColors: Record<string, string> = {
   suspended: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
 };
 
-const statusIcons: Record<string, React.ReactNode> = {
-  pending: <Clock className="h-3 w-3" />,
-  dns_pending: <AlertCircle className="h-3 w-3" />,
-  active: <CheckCircle className="h-3 w-3" />,
-  suspended: <Ban className="h-3 w-3" />,
-};
+function StatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'pending':
+      return <Clock className="h-3 w-3" />;
+    case 'dns_pending':
+      return <AlertCircle className="h-3 w-3" />;
+    case 'active':
+      return <CheckCircle className="h-3 w-3" />;
+    case 'suspended':
+      return <Ban className="h-3 w-3" />;
+    default:
+      return null;
+  }
+}
 
 export default function AdminOrganizationDetailPage() {
   const { id } = useParams();
@@ -441,7 +449,7 @@ export default function AdminOrganizationDetailPage() {
                       'px-2 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1',
                       statusColors[domain.status]
                     )}>
-                      {statusIcons[domain.status]}
+                      <StatusIcon status={domain.status} />
                       {domain.status.replace('_', ' ')}
                     </span>
                   </td>
@@ -542,7 +550,7 @@ export default function AdminOrganizationDetailPage() {
                       'px-2 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1',
                       statusColors[user.status]
                     )}>
-                      {statusIcons[user.status]}
+                      <StatusIcon status={user.status} />
                       {user.status}
                     </span>
                   </td>
