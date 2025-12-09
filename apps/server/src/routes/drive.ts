@@ -1,7 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { createDb } from '../db';
-import { driveFile, driveFolder } from '../db/schema';
+import { driveFile, driveFolder, organizationUser } from '../db/schema';
 import { env } from '../env';
 import type { HonoContext } from '../ctx';
 import jwt from '@tsndr/cloudflare-worker-jwt';
@@ -47,6 +47,43 @@ driveApiRouter.post('/upload', async (c) => {
     const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
     try {
+      // Check drive storage quota for organization users
+      const orgUser = await db.query.organizationUser.findFirst({
+        where: eq(organizationUser.userId, userRecord.id),
+      });
+
+      if (orgUser) {
+        // Get current drive usage
+        const currentUsage = await db
+          .select({ totalSize: sql<number>`COALESCE(SUM(${driveFile.size}), 0)` })
+          .from(driveFile)
+          .where(and(eq(driveFile.userId, userRecord.id), eq(driveFile.isTrashed, false)));
+
+        const usedBytes = currentUsage[0]?.totalSize || 0;
+        const quotaBytes = orgUser.driveStorageBytes;
+
+        // Check if upload would exceed quota
+        if (quotaBytes > 0 && usedBytes + file.size > quotaBytes) {
+          const usedGB = (usedBytes / (1024 * 1024 * 1024)).toFixed(2);
+          const quotaGB = (quotaBytes / (1024 * 1024 * 1024)).toFixed(2);
+          return c.json({
+            error: 'Storage quota exceeded',
+            message: `You have used ${usedGB} GB of your ${quotaGB} GB drive storage quota. Please delete some files or contact your administrator to increase your quota.`,
+            usedBytes,
+            quotaBytes,
+          }, 507); // 507 Insufficient Storage
+        }
+
+        // Update organization user's drive used bytes
+        await db
+          .update(organizationUser)
+          .set({
+            driveUsedBytes: usedBytes + file.size,
+            updatedAt: new Date(),
+          })
+          .where(eq(organizationUser.id, orgUser.id));
+      }
+
       // Verify folder exists if provided
       if (folderId) {
         const folder = await db.query.driveFolder.findFirst({

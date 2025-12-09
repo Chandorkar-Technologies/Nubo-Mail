@@ -622,11 +622,34 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
       }
 
+      // Get partner info if exists
+      let partnerData = null;
+      if (org[0].partnerId) {
+        const partnerResult = await db
+          .select({
+            id: partner.id,
+            companyName: partner.companyName,
+            tierName: partner.tierName,
+          })
+          .from(partner)
+          .where(eq(partner.id, org[0].partnerId))
+          .limit(1);
+        partnerData = partnerResult[0] || null;
+      }
+
       // Get domains
       const domains = await db
         .select()
         .from(organizationDomain)
-        .where(eq(organizationDomain.organizationId, input.organizationId));
+        .where(eq(organizationDomain.organizationId, input.organizationId))
+        .orderBy(desc(organizationDomain.isPrimary), asc(organizationDomain.domainName));
+
+      // Get users (email accounts)
+      const users = await db
+        .select()
+        .from(organizationUser)
+        .where(eq(organizationUser.organizationId, input.organizationId))
+        .orderBy(asc(organizationUser.emailAddress));
 
       // Get user count
       const userCount = await db
@@ -636,7 +659,9 @@ export const adminRouter = router({
 
       return {
         organization: org[0],
+        partner: partnerData,
         domains,
+        users,
         userCount: userCount[0]?.count ?? 0,
       };
     }),
@@ -798,6 +823,22 @@ export const adminRouter = router({
         requestId: z.string(),
         action: z.enum(['approve', 'reject']),
         rejectionReason: z.string().optional(),
+        // Optional IMAP/SMTP settings for user approval
+        imapSettings: z.object({
+          host: z.string(),
+          port: z.number(),
+          username: z.string(),
+          password: z.string(),
+        }).optional(),
+        smtpSettings: z.object({
+          host: z.string(),
+          port: z.number(),
+          username: z.string(),
+          password: z.string(),
+        }).optional(),
+        // Optional storage settings
+        mailboxStorageBytes: z.number().optional(),
+        driveStorageBytes: z.number().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -821,6 +862,8 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
       }
 
+      const requestData = request[0].requestData as Record<string, unknown>;
+
       // Process based on request type
       if (input.action === 'approve') {
         // Handle different approval types
@@ -841,19 +884,78 @@ export const adminRouter = router({
 
           case 'user':
             if (request[0].targetUserId) {
+              // Update organization user with IMAP/SMTP settings if provided
+              const userUpdateData: Record<string, unknown> = {
+                status: 'active',
+                provisionedBy: sessionUser.id,
+                provisionedAt: new Date(),
+                updatedAt: new Date(),
+              };
+
+              // Set IMAP settings if provided
+              if (input.imapSettings) {
+                userUpdateData.imapHost = input.imapSettings.host;
+                userUpdateData.imapPort = input.imapSettings.port;
+                userUpdateData.imapUsername = input.imapSettings.username;
+                // In production, encrypt the password before storing
+                userUpdateData.imapPasswordEncrypted = input.imapSettings.password;
+              }
+
+              // Set SMTP settings if provided
+              if (input.smtpSettings) {
+                userUpdateData.smtpHost = input.smtpSettings.host;
+                userUpdateData.smtpPort = input.smtpSettings.port;
+                userUpdateData.smtpUsername = input.smtpSettings.username;
+                // In production, encrypt the password before storing
+                userUpdateData.smtpPasswordEncrypted = input.smtpSettings.password;
+              }
+
+              // Set storage allocation if provided
+              if (input.mailboxStorageBytes !== undefined) {
+                userUpdateData.mailboxStorageBytes = input.mailboxStorageBytes;
+              }
+              if (input.driveStorageBytes !== undefined) {
+                userUpdateData.driveStorageBytes = input.driveStorageBytes;
+              }
+
               await db
                 .update(organizationUser)
-                .set({
-                  status: 'active',
-                  provisionedBy: sessionUser.id,
-                  provisionedAt: new Date(),
-                  updatedAt: new Date(),
-                })
+                .set(userUpdateData)
                 .where(eq(organizationUser.id, request[0].targetUserId));
             }
             break;
 
-          // Add more cases as needed
+          case 'storage':
+            // Storage increase request for an organization
+            if (request[0].targetOrganizationId && requestData.storageBytes) {
+              await db
+                .update(organization)
+                .set({
+                  totalStorageBytes: requestData.storageBytes as number,
+                  updatedAt: new Date(),
+                })
+                .where(eq(organization.id, request[0].targetOrganizationId));
+            }
+            break;
+
+          case 'archival':
+            // Archival storage request for a domain
+            if (request[0].targetDomainId && requestData.storageBytes) {
+              await db
+                .update(organizationDomain)
+                .set({
+                  archivalEnabled: true,
+                  archivalStorageBytes: requestData.storageBytes as number,
+                  updatedAt: new Date(),
+                })
+                .where(eq(organizationDomain.id, request[0].targetDomainId));
+            }
+            break;
+
+          case 'organization':
+            // Organization creation request - typically partner-based
+            // Just mark as approved, organization creation is handled separately
+            break;
         }
       }
 

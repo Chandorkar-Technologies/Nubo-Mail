@@ -1,5 +1,5 @@
 import { privateProcedure, router } from '../trpc';
-import { driveFile, driveFolder, driveImportJob, driveShare, user } from '../../db/schema';
+import { driveFile, driveFolder, driveImportJob, driveShare, user, organizationUser } from '../../db/schema';
 import { eq, and, isNull, desc, asc, or, sql, like } from 'drizzle-orm';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type * as schema from '../../db/schema';
@@ -622,10 +622,25 @@ export const driveRouter = router({
       byCategory[category].size += file.size;
     }
 
+    // Get storage quota for organization users
+    let quotaBytes = 0;
+    const orgUser = await ctx.db.query.organizationUser.findFirst({
+      where: eq(organizationUser.userId, sessionUser.id),
+      columns: {
+        driveStorageBytes: true,
+      },
+    });
+
+    if (orgUser) {
+      quotaBytes = orgUser.driveStorageBytes;
+    }
+
     return {
       totalSize,
       totalFiles,
       byCategory,
+      quotaBytes, // 0 means no limit (retail users or users without org)
+      usagePercent: quotaBytes > 0 ? (totalSize / quotaBytes) * 100 : 0,
     };
   }),
 

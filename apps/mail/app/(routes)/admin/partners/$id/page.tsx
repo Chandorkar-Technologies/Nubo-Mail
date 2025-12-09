@@ -15,6 +15,7 @@ import {
   Pencil,
   Ban,
   CheckCircle,
+  Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -372,7 +373,12 @@ export default function AdminPartnerDetailPage() {
 
       {/* Organizations */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Organizations</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Organizations</h2>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {organizations.length} organization{organizations.length !== 1 ? 's' : ''}
+          </span>
+        </div>
         {organizations.length === 0 ? (
           <p className="text-gray-500 dark:text-gray-400">No organizations created yet</p>
         ) : (
@@ -381,15 +387,42 @@ export default function AdminPartnerDetailPage() {
               <tr className="border-b border-gray-200 dark:border-gray-700">
                 <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">Name</th>
                 <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">Storage</th>
+                <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">Type</th>
                 <th className="text-left py-3 text-sm font-medium text-gray-500 dark:text-gray-400">Status</th>
+                <th className="text-right py-3 text-sm font-medium text-gray-500 dark:text-gray-400">Actions</th>
               </tr>
             </thead>
             <tbody>
               {organizations.map((org) => (
-                <tr key={org.id} className="border-b border-gray-200 dark:border-gray-700 last:border-0">
-                  <td className="py-3 text-gray-900 dark:text-white">{org.name}</td>
+                <tr key={org.id} className="border-b border-gray-200 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td className="py-3">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-900 dark:text-white font-medium">{org.name}</span>
+                    </div>
+                  </td>
                   <td className="py-3 text-gray-900 dark:text-white">
-                    {formatBytes(org.usedStorageBytes || 0)} / {formatBytes(org.totalStorageBytes || 0)}
+                    <div className="flex flex-col">
+                      <span className="text-sm">{formatBytes(org.usedStorageBytes || 0)} / {formatBytes(org.totalStorageBytes || 0)}</span>
+                      <div className="w-24 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full mt-1">
+                        <div
+                          className="h-full bg-blue-600 rounded-full"
+                          style={{
+                            width: `${Math.min(100, ((org.usedStorageBytes || 0) / (org.totalStorageBytes || 1)) * 100)}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3">
+                    <span className={cn(
+                      'px-2 py-1 rounded-full text-xs font-medium',
+                      org.isRetail
+                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                        : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                    )}>
+                      {org.isRetail ? 'Retail' : 'Partner'}
+                    </span>
                   </td>
                   <td className="py-3">
                     <span className={cn(
@@ -400,6 +433,16 @@ export default function AdminPartnerDetailPage() {
                     )}>
                       {org.isActive ? 'Active' : 'Suspended'}
                     </span>
+                  </td>
+                  <td className="py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate(`/admin/organizations/${org.id}`)}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      View
+                    </Button>
                   </td>
                 </tr>
               ))}

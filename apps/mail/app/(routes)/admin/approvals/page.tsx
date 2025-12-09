@@ -12,8 +12,12 @@ import {
   HardDrive,
   Archive,
   Building2,
+  Server,
+  Mail,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -30,6 +34,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -58,9 +63,22 @@ export default function ApprovalsPage() {
 
   // Dialog states
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [approveUserDialogOpen, setApproveUserDialogOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [processing, setProcessing] = useState(false);
+
+  // IMAP/SMTP settings for user approval
+  const [imapHost, setImapHost] = useState('');
+  const [imapPort, setImapPort] = useState('993');
+  const [imapUsername, setImapUsername] = useState('');
+  const [imapPassword, setImapPassword] = useState('');
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('587');
+  const [smtpUsername, setSmtpUsername] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [mailboxStorageGB, setMailboxStorageGB] = useState('5');
+  const [driveStorageGB, setDriveStorageGB] = useState('5');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -103,6 +121,64 @@ export default function ApprovalsPage() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handleOpenUserApprovalDialog = (request: any) => {
+    const requestData = request.requestData as Record<string, any>;
+    setSelectedRequest(request);
+    // Pre-fill username from email
+    const email = requestData.emailAddress || '';
+    setImapUsername(email);
+    setSmtpUsername(email);
+    setApproveUserDialogOpen(true);
+  };
+
+  const handleApproveUserWithSettings = async () => {
+    if (!selectedRequest) return;
+    setProcessing(true);
+    try {
+      await api.admin.processApprovalRequest.mutate({
+        requestId: selectedRequest.id,
+        action: 'approve',
+        imapSettings: imapHost ? {
+          host: imapHost,
+          port: parseInt(imapPort) || 993,
+          username: imapUsername,
+          password: imapPassword,
+        } : undefined,
+        smtpSettings: smtpHost ? {
+          host: smtpHost,
+          port: parseInt(smtpPort) || 587,
+          username: smtpUsername,
+          password: smtpPassword,
+        } : undefined,
+        mailboxStorageBytes: parseFloat(mailboxStorageGB) * 1024 * 1024 * 1024,
+        driveStorageBytes: parseFloat(driveStorageGB) * 1024 * 1024 * 1024,
+      });
+      toast.success('User account approved and provisioned');
+      setApproveUserDialogOpen(false);
+      resetUserApprovalForm();
+      setRequests((prev) => prev.filter((req) => req.id !== selectedRequest.id));
+    } catch (error) {
+      console.error('Failed to approve user:', error);
+      toast.error('Failed to approve user');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const resetUserApprovalForm = () => {
+    setSelectedRequest(null);
+    setImapHost('');
+    setImapPort('993');
+    setImapUsername('');
+    setImapPassword('');
+    setSmtpHost('');
+    setSmtpPort('587');
+    setSmtpUsername('');
+    setSmtpPassword('');
+    setMailboxStorageGB('5');
+    setDriveStorageGB('5');
   };
 
   const handleReject = async () => {
@@ -302,12 +378,18 @@ export default function ApprovalsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleApprove(request.id)}
+                          onClick={() => {
+                            if (request.type === 'user') {
+                              handleOpenUserApprovalDialog(request);
+                            } else {
+                              handleApprove(request.id);
+                            }
+                          }}
                           disabled={processing}
                           className="text-green-600 hover:text-green-700"
                         >
                           <Check className="h-4 w-4 mr-1" />
-                          Approve
+                          {request.type === 'user' ? 'Configure & Approve' : 'Approve'}
                         </Button>
                         <Button
                           variant="outline"
@@ -362,7 +444,7 @@ export default function ApprovalsPage() {
 
       {/* Reject Dialog */}
       <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
-        <DialogContent>
+        <DialogContent showOverlay>
           <DialogHeader>
             <DialogTitle>Reject Request</DialogTitle>
             <DialogDescription>
@@ -385,6 +467,171 @@ export default function ApprovalsPage() {
               disabled={!rejectionReason || processing}
             >
               Reject Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* User Approval Dialog with IMAP/SMTP Settings */}
+      <Dialog open={approveUserDialogOpen} onOpenChange={(open) => {
+        setApproveUserDialogOpen(open);
+        if (!open) resetUserApprovalForm();
+      }}>
+        <DialogContent showOverlay className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Approve User Account</DialogTitle>
+            <DialogDescription>
+              Configure IMAP/SMTP settings and storage allocation for this user account.
+              {selectedRequest && (
+                <span className="block mt-2 font-medium text-gray-900 dark:text-white">
+                  Email: {(selectedRequest.requestData as Record<string, any>)?.emailAddress}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs defaultValue="imap" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="imap">
+                <Server className="h-4 w-4 mr-2" />
+                IMAP
+              </TabsTrigger>
+              <TabsTrigger value="smtp">
+                <Mail className="h-4 w-4 mr-2" />
+                SMTP
+              </TabsTrigger>
+              <TabsTrigger value="storage">
+                <HardDrive className="h-4 w-4 mr-2" />
+                Storage
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="imap" className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="imapHost">IMAP Host</Label>
+                  <Input
+                    id="imapHost"
+                    placeholder="imap.example.com"
+                    value={imapHost}
+                    onChange={(e) => setImapHost(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="imapPort">IMAP Port</Label>
+                  <Input
+                    id="imapPort"
+                    placeholder="993"
+                    value={imapPort}
+                    onChange={(e) => setImapPort(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="imapUsername">IMAP Username</Label>
+                <Input
+                  id="imapUsername"
+                  placeholder="user@example.com"
+                  value={imapUsername}
+                  onChange={(e) => setImapUsername(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="imapPassword">IMAP Password</Label>
+                <Input
+                  id="imapPassword"
+                  type="password"
+                  placeholder="Enter password"
+                  value={imapPassword}
+                  onChange={(e) => setImapPassword(e.target.value)}
+                />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="smtp" className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="smtpHost">SMTP Host</Label>
+                  <Input
+                    id="smtpHost"
+                    placeholder="smtp.example.com"
+                    value={smtpHost}
+                    onChange={(e) => setSmtpHost(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="smtpPort">SMTP Port</Label>
+                  <Input
+                    id="smtpPort"
+                    placeholder="587"
+                    value={smtpPort}
+                    onChange={(e) => setSmtpPort(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="smtpUsername">SMTP Username</Label>
+                <Input
+                  id="smtpUsername"
+                  placeholder="user@example.com"
+                  value={smtpUsername}
+                  onChange={(e) => setSmtpUsername(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="smtpPassword">SMTP Password</Label>
+                <Input
+                  id="smtpPassword"
+                  type="password"
+                  placeholder="Enter password"
+                  value={smtpPassword}
+                  onChange={(e) => setSmtpPassword(e.target.value)}
+                />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="storage" className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="mailboxStorage">Mailbox Storage (GB)</Label>
+                  <Input
+                    id="mailboxStorage"
+                    type="number"
+                    placeholder="5"
+                    value={mailboxStorageGB}
+                    onChange={(e) => setMailboxStorageGB(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">Email storage allocation</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="driveStorage">Drive Storage (GB)</Label>
+                  <Input
+                    id="driveStorage"
+                    type="number"
+                    placeholder="5"
+                    value={driveStorageGB}
+                    onChange={(e) => setDriveStorageGB(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">Nubo Drive storage allocation</p>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => {
+              setApproveUserDialogOpen(false);
+              resetUserApprovalForm();
+            }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApproveUserWithSettings}
+              disabled={processing}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Approve & Provision
             </Button>
           </DialogFooter>
         </DialogContent>

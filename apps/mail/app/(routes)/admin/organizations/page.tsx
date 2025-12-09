@@ -2,6 +2,7 @@
 
 import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Building2, Search, Users, HardDrive, MoreVertical, Eye, Ban, CheckCircle, Pencil, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ interface Organization {
 }
 
 export default function AdminOrganizationsPage() {
+  const navigate = useNavigate();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -53,7 +55,7 @@ export default function AdminOrganizationsPage() {
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
   const [partnerDialogOpen, setPartnerDialogOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
-  const [orgDetails, setOrgDetails] = useState<any>(null);
+  const [_orgDetails, _setOrgDetails] = useState<any>(null);
   const [newStorageGB, setNewStorageGB] = useState('');
   const [suspensionReason, setSuspensionReason] = useState('');
   const [partners, setPartners] = useState<Array<{ id: string; companyName: string }>>([]);
@@ -81,16 +83,8 @@ export default function AdminOrganizationsPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const handleViewDetails = async (org: Organization) => {
-    setSelectedOrg(org);
-    try {
-      const details = await api.admin.getOrganizationById.query({ organizationId: org.id });
-      setOrgDetails(details);
-      setViewDialogOpen(true);
-    } catch (error) {
-      console.error('Failed to fetch organization details:', error);
-      toast.error('Failed to load organization details');
-    }
+  const handleViewDetails = (org: Organization) => {
+    navigate(`/admin/organizations/${org.id}`);
   };
 
   const handleOpenStorageDialog = (org: Organization) => {
