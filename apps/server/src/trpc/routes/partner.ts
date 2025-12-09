@@ -180,6 +180,8 @@ export const partnerRouter = router({
   getDashboardStats: partnerMiddleware.query(async ({ ctx }) => {
     const { db, partner: partnerData, tier } = ctx;
 
+    console.log('[Partner getDashboardStats] Partner:', JSON.stringify({ id: partnerData.id, companyName: partnerData.companyName, userId: partnerData.userId }));
+
     // Get counts in parallel
     const [orgCount, userCount, domainCount, pendingInvoices] = await Promise.all([
       db
