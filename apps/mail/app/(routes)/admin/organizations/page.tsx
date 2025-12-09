@@ -322,7 +322,7 @@ export default function AdminOrganizationsPage() {
 
       {/* View Details Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent showOverlay className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{selectedOrg?.name}</DialogTitle>
             <DialogDescription>Organization details and information</DialogDescription>
@@ -374,7 +374,7 @@ export default function AdminOrganizationsPage() {
 
       {/* Manage Storage Dialog */}
       <Dialog open={storageDialogOpen} onOpenChange={setStorageDialogOpen}>
-        <DialogContent>
+        <DialogContent showOverlay>
           <DialogHeader>
             <DialogTitle>Manage Storage</DialogTitle>
             <DialogDescription>
@@ -407,7 +407,7 @@ export default function AdminOrganizationsPage() {
 
       {/* Suspend Dialog */}
       <Dialog open={suspendDialogOpen} onOpenChange={setSuspendDialogOpen}>
-        <DialogContent>
+        <DialogContent showOverlay>
           <DialogHeader>
             <DialogTitle>Suspend Organization</DialogTitle>
             <DialogDescription>
