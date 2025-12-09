@@ -180,8 +180,6 @@ export const partnerRouter = router({
   getDashboardStats: partnerMiddleware.query(async ({ ctx }) => {
     const { db, partner: partnerData, tier } = ctx;
 
-    console.log('[Partner getDashboardStats] Partner:', JSON.stringify({ id: partnerData.id, companyName: partnerData.companyName, userId: partnerData.userId }));
-
     // Get counts in parallel
     const [orgCount, userCount, domainCount, pendingInvoices] = await Promise.all([
       db
@@ -295,12 +293,6 @@ export const partnerRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { db, partner: partnerData } = ctx;
-
-      console.log('[Partner getOrganizations] Partner ID:', partnerData.id, 'Company:', partnerData.companyName);
-
-      // First, let's see ALL organizations to debug
-      const allOrgs = await db.select({ id: organization.id, name: organization.name, partnerId: organization.partnerId }).from(organization).limit(10);
-      console.log('[Partner getOrganizations] All orgs in DB:', JSON.stringify(allOrgs));
 
       const offset = (input.page - 1) * input.limit;
 
