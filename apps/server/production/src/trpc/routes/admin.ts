@@ -255,7 +255,7 @@ export const adminRouter = router({
         tierId: tierId ?? null,
         tierName: tier?.[0]?.name ?? 'entry',
         discountPercentage: tier?.[0]?.discountPercentage ?? '20.00',
-        allocatedStorageBytes: input.allocatedStorageBytes ?? 10 * 1024 * 1024 * 1024, // Default 10GB
+        allocatedStorageBytes: input.allocatedStorageBytes ?? 0,
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
