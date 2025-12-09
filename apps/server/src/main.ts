@@ -1048,6 +1048,9 @@ const api = new Hono<HonoContext>()
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
   })
+  .on(['GET', 'POST', 'OPTIONS'], '/api/auth/*', (c) => {
+    return c.var.auth.handler(c.req.raw);
+  })
   .use(
     '/trpc/*',
     async (c, next) => {
