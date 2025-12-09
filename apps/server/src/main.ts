@@ -41,7 +41,6 @@ import { defaultUserSettings } from './lib/schemas';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { enableBrainFunction } from './lib/brain';
 import { trpcServer } from '@hono/trpc-server';
-import { agentsMiddleware } from 'hono-agents';
 import { ZeroMCP } from './routes/agent/mcp';
 import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
@@ -1174,18 +1173,6 @@ const app = new Hono<HonoContext>()
     { replaceRequest: false },
   )
   .route('/api', api)
-  .use(
-    '*',
-    agentsMiddleware({
-      options: {
-        onBeforeConnect: (c) => {
-          if (!c.headers.get('Cookie')) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-        },
-      },
-    }),
-  )
   .get('/health', (c) => c.json({ message: 'Zero Server is Up!' }))
   .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/monitoring/sentry', async (c) => {
