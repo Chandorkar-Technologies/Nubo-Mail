@@ -1185,6 +1185,16 @@ export const partner = createTable(
     companyWebsite: text('company_website'),
     companyAddress: text('company_address'),
     companyGst: text('company_gst'),
+    // Contact information
+    contactEmail: text('contact_email'),
+    contactPhone: text('contact_phone'),
+    // Address fields
+    city: text('city'),
+    state: text('state'),
+    country: text('country').default('India'),
+    postalCode: text('postal_code'),
+    // Tax information
+    panNumber: text('pan_number'),
     tierId: text('tier_id').references(() => partnerTier.id, { onDelete: 'set null' }),
     tierName: text('tier_name').default('entry'), // Cached for quick access: entry, bronze, silver, gold
     discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).default('20.00'),

@@ -61,18 +61,18 @@ export default function PartnerSettingsPage() {
     const fetchProfile = async () => {
       try {
         const data = await api.partner.getPartnerProfile.query();
-        setProfile(data);
+        setProfile(data as any);
         setFormData({
           companyName: data.partner.companyName || '',
           contactEmail: data.partner.contactEmail || '',
           contactPhone: data.partner.contactPhone || '',
-          website: data.partner.website || '',
-          address: data.partner.address || '',
+          website: data.partner.companyWebsite || '',
+          address: data.partner.companyAddress || '',
           city: data.partner.city || '',
           state: data.partner.state || '',
           country: data.partner.country || 'India',
           postalCode: data.partner.postalCode || '',
-          gstNumber: data.partner.gstNumber || '',
+          gstNumber: data.partner.companyGst || '',
           panNumber: data.partner.panNumber || '',
         });
       } catch (error) {
@@ -88,7 +88,19 @@ export default function PartnerSettingsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      // This would call an update endpoint
+      await api.partner.updatePartnerProfile.mutate({
+        companyName: formData.companyName,
+        companyWebsite: formData.website || undefined,
+        companyAddress: formData.address || undefined,
+        companyGst: formData.gstNumber || undefined,
+        contactEmail: formData.contactEmail || undefined,
+        contactPhone: formData.contactPhone || undefined,
+        city: formData.city || undefined,
+        state: formData.state || undefined,
+        country: formData.country || undefined,
+        postalCode: formData.postalCode || undefined,
+        panNumber: formData.panNumber || undefined,
+      });
       toast.success('Settings saved successfully');
     } catch (error: any) {
       console.error('Failed to save settings:', error);

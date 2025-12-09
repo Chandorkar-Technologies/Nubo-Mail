@@ -237,6 +237,36 @@ export const partnerRouter = router({
     };
   }),
 
+  updatePartnerProfile: partnerMiddleware
+    .input(
+      z.object({
+        companyName: z.string().min(1).optional(),
+        companyWebsite: z.string().optional(),
+        companyAddress: z.string().optional(),
+        companyGst: z.string().optional(),
+        contactEmail: z.string().email().optional(),
+        contactPhone: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        country: z.string().optional(),
+        postalCode: z.string().optional(),
+        panNumber: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, partner: partnerData } = ctx;
+
+      await db
+        .update(partner)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(eq(partner.id, partnerData.id));
+
+      return { success: true };
+    }),
+
   // ======================= Quarterly Sales =======================
 
   getQuarterlySales: partnerMiddleware.query(async ({ ctx }) => {
