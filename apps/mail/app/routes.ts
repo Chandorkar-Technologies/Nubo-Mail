@@ -30,6 +30,7 @@ export default [
     route('/admin/partners', '(routes)/admin/partners/page.tsx'),
     route('/admin/partners/:id', '(routes)/admin/partners/$id/page.tsx'),
     route('/admin/organizations', '(routes)/admin/organizations/page.tsx'),
+    route('/admin/organizations/:id', '(routes)/admin/organizations/$id/page.tsx'),
     route('/admin/approvals', '(routes)/admin/approvals/page.tsx'),
     route('/admin/pricing', '(routes)/admin/pricing/page.tsx'),
     route('/admin/invoices', '(routes)/admin/invoices/page.tsx'),
