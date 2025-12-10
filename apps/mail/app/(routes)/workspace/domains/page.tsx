@@ -30,6 +30,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -57,16 +67,20 @@ export default function WorkspaceDomainsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [dnsDialogOpen, setDnsDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [domainToDelete, setDomainToDelete] = useState<Domain | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchDomains = async () => {
       try {
         const data = await api.workspace.getDomains.query();
-        setDomains(data.domains);
+        setDomains(data?.domains || []);
       } catch (error) {
         console.error('Failed to fetch domains:', error);
+        setDomains([]);
       } finally {
         setLoading(false);
       }
@@ -82,7 +96,7 @@ export default function WorkspaceDomainsPage() {
         toast.success('Domain verified successfully');
         // Refresh domains list
         const data = await api.workspace.getDomains.query();
-        setDomains(data.domains);
+        setDomains(data?.domains || []);
       } else {
         toast.error('DNS verification failed. Please check your records.');
       }
@@ -91,6 +105,31 @@ export default function WorkspaceDomainsPage() {
       toast.error(error.message || 'Failed to verify DNS');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handleDeleteClick = (domain: Domain) => {
+    setDomainToDelete(domain);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteDomain = async () => {
+    if (!domainToDelete) return;
+
+    setDeleting(true);
+    try {
+      const result = await api.workspace.deleteDomain.mutate({ domainId: domainToDelete.id });
+      toast.success(result.message || 'Delete request submitted for admin approval');
+      setDeleteDialogOpen(false);
+      setDomainToDelete(null);
+      // Refresh domains list
+      const data = await api.workspace.getDomains.query();
+      setDomains(data?.domains || []);
+    } catch (error: unknown) {
+      console.error('Failed to delete domain:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete domain');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -115,8 +154,14 @@ export default function WorkspaceDomainsPage() {
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       verified: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+      active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
       pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
       failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+      pending_deletion: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    };
+
+    const displayText: Record<string, string> = {
+      pending_deletion: 'Pending Deletion',
     };
 
     return (
@@ -127,7 +172,7 @@ export default function WorkspaceDomainsPage() {
         )}
       >
         {getStatusIcon(status)}
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {displayText[status] || status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     );
   };
@@ -290,7 +335,11 @@ export default function WorkspaceDomainsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem className="text-red-600">
+                        <DropdownMenuItem
+                          className="text-red-600"
+                          onClick={() => handleDeleteClick(domain)}
+                          disabled={deleting}
+                        >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Remove Domain
                         </DropdownMenuItem>
@@ -456,6 +505,29 @@ export default function WorkspaceDomainsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Domain Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Domain</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{domainToDelete?.domainName}</strong>? This action
+              requires admin approval.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteDomain}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleting ? 'Submitting...' : 'Delete Domain'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

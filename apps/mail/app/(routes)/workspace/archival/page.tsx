@@ -10,8 +10,11 @@ import {
   AlertCircle,
   Check,
   Settings,
+  Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -30,6 +33,12 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
+interface Domain {
+  id: string;
+  domainName: string;
+  archivalEnabled?: boolean;
+}
+
 interface ArchivalConfig {
   enabled: boolean;
   retentionDays: number;
@@ -37,45 +46,102 @@ interface ArchivalConfig {
   storageUsedBytes: number;
   lastArchivalDate: string | null;
   emailsArchived: number;
-  domains: Array<{
-    id: string;
-    domainName: string;
-    archivalEnabled: boolean;
-  }>;
+  domains: Domain[];
 }
 
 export default function WorkspaceArchivalPage() {
   const [config, setConfig] = useState<ArchivalConfig | null>(null);
+  const [domains, setDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [selectedRetention, setSelectedRetention] = useState('365');
+  const [selectedDomainId, setSelectedDomainId] = useState<string>('');
+  const [storageGB, setStorageGB] = useState('10');
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    const fetchConfig = async () => {
+    const fetchData = async () => {
       try {
-        const data = await api.workspace.getArchivalConfig.query();
-        setConfig(data);
+        // Fetch domains first
+        const domainsData = await api.workspace.getDomains.query();
+        const domainsList = domainsData?.domains || [];
+        setDomains(domainsList);
+
+        // Check if any domain has archival enabled
+        let archivalConfig: ArchivalConfig = {
+          enabled: false,
+          retentionDays: 0,
+          storageAllocatedBytes: 0,
+          storageUsedBytes: 0,
+          lastArchivalDate: null,
+          emailsArchived: 0,
+          domains: domainsList.map((d) => ({
+            id: d.id,
+            domainName: d.domainName,
+            archivalEnabled: false,
+          })),
+        };
+
+        // Try to get archival config for each domain
+        for (const domain of domainsList) {
+          try {
+            const data = await api.workspace.getArchivalConfig.query({ domainId: domain.id });
+            if (data?.isEnabled) {
+              archivalConfig = {
+                enabled: true,
+                retentionDays: data.archival?.retentionDays || 365,
+                storageAllocatedBytes: Number(data.archival?.storageAllocatedBytes || 0),
+                storageUsedBytes: Number(data.archival?.storageUsedBytes || 0),
+                lastArchivalDate: null,
+                emailsArchived: 0,
+                domains: domainsList.map((d) => ({
+                  id: d.id,
+                  domainName: d.domainName,
+                  archivalEnabled: d.id === domain.id,
+                })),
+              };
+              break;
+            }
+          } catch {
+            // Domain doesn't have archival configured
+          }
+        }
+
+        setConfig(archivalConfig);
+
+        // Set first domain as default selection
+        if (domainsList.length > 0) {
+          setSelectedDomainId(domainsList[0].id);
+        }
       } catch (error) {
         console.error('Failed to fetch archival config:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchConfig();
+    fetchData();
   }, []);
 
   const handleEnableArchival = async () => {
+    if (!selectedDomainId) {
+      toast.error('Please select a domain');
+      return;
+    }
+    const storageBytesNum = parseFloat(storageGB) * 1024 * 1024 * 1024;
+    if (storageBytesNum <= 0) {
+      toast.error('Please enter a valid storage amount');
+      return;
+    }
+
     setProcessing(true);
     try {
       await api.workspace.requestArchival.mutate({
+        domainId: selectedDomainId,
+        storageBytes: storageBytesNum,
         retentionDays: parseInt(selectedRetention),
       });
       toast.success('Archival request submitted for approval');
       setSetupDialogOpen(false);
-      // Refresh config
-      const data = await api.workspace.getArchivalConfig.query();
-      setConfig(data);
     } catch (error: any) {
       console.error('Failed to enable archival:', error);
       toast.error(error.message || 'Failed to enable archival');
@@ -301,44 +367,89 @@ export default function WorkspaceArchivalPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-900 dark:text-white">
-                Retention Period
-              </label>
-              <Select value={selectedRetention} onValueChange={setSelectedRetention}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select retention period" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="365">1 Year</SelectItem>
-                  <SelectItem value="730">2 Years</SelectItem>
-                  <SelectItem value="1095">3 Years</SelectItem>
-                  <SelectItem value="1825">5 Years</SelectItem>
-                  <SelectItem value="2555">7 Years</SelectItem>
-                  <SelectItem value="3650">10 Years</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Emails will be retained for the selected period
-              </p>
-            </div>
-
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
-              <div className="text-sm text-yellow-700 dark:text-yellow-300">
-                <p className="font-medium">Additional storage required</p>
-                <p>
-                  Archival requires dedicated storage. Your request will be sent to your partner
-                  for approval and storage allocation.
-                </p>
+            {domains.length === 0 ? (
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                  <p className="font-medium">No domains available</p>
+                  <p>
+                    Please add a domain first before enabling archival.
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Select Domain</Label>
+                  <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select domain" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {domains.map((domain) => (
+                        <SelectItem key={domain.id} value={domain.id}>
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4" />
+                            {domain.domainName}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Storage Allocation (GB)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={storageGB}
+                    onChange={(e) => setStorageGB(e.target.value)}
+                    placeholder="Enter storage in GB"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Storage dedicated for email archival
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Retention Period</Label>
+                  <Select value={selectedRetention} onValueChange={setSelectedRetention}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select retention period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="365">1 Year</SelectItem>
+                      <SelectItem value="730">2 Years</SelectItem>
+                      <SelectItem value="1095">3 Years</SelectItem>
+                      <SelectItem value="1825">5 Years</SelectItem>
+                      <SelectItem value="2555">7 Years</SelectItem>
+                      <SelectItem value="3650">10 Years</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Emails will be retained for the selected period
+                  </p>
+                </div>
+
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                    <p className="font-medium">Additional storage required</p>
+                    <p>
+                      Archival requires dedicated storage. Your request will be sent to your partner
+                      for approval and storage allocation.
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSetupDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleEnableArchival} disabled={processing}>
+            <Button onClick={handleEnableArchival} disabled={processing || domains.length === 0}>
               {processing ? 'Submitting...' : 'Request Archival'}
             </Button>
           </DialogFooter>

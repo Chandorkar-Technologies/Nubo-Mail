@@ -125,6 +125,9 @@ export type ZeroEnv = {
   ROCKETCHAT_URL?: string;
   ROCKETCHAT_ADMIN_USER_ID?: string;
   ROCKETCHAT_ADMIN_AUTH_TOKEN?: string;
+  // Mailcow Mail Server API
+  MAILCOW_API_URL?: string;
+  MAILCOW_API_KEY?: string;
 };
 
 const env = _env as ZeroEnv;

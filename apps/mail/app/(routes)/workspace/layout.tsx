@@ -14,6 +14,7 @@ import {
   ChevronDown,
   LogOut,
   Building2,
+  Forward,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ const navItems = [
   { href: '/workspace', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { href: '/workspace/domains', label: 'Domains', icon: Globe },
   { href: '/workspace/users', label: 'Users', icon: Users },
+  { href: '/workspace/aliases', label: 'Aliases', icon: Forward },
   { href: '/workspace/storage', label: 'Storage', icon: HardDrive },
   { href: '/workspace/archival', label: 'Archival', icon: Archive },
   { href: '/workspace/invoices', label: 'Invoices', icon: CreditCard },

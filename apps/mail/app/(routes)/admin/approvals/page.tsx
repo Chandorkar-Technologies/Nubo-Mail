@@ -14,6 +14,7 @@ import {
   Building2,
   Server,
   Mail,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +45,9 @@ const typeIcons: Record<string, any> = {
   storage: HardDrive,
   archival: Archive,
   organization: Building2,
+  user_deletion: Trash2,
+  domain_deletion: Trash2,
+  alias_deletion: Trash2,
 };
 
 const typeLabels: Record<string, string> = {
@@ -52,6 +56,9 @@ const typeLabels: Record<string, string> = {
   storage: 'Storage',
   archival: 'Archival',
   organization: 'Organization',
+  user_deletion: 'User Deletion',
+  domain_deletion: 'Domain Deletion',
+  alias_deletion: 'Alias Deletion',
 };
 
 export default function ApprovalsPage() {
@@ -226,7 +233,7 @@ export default function ApprovalsPage() {
       {/* Filters */}
       <div className="flex gap-4 mb-6">
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-48">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
@@ -236,6 +243,9 @@ export default function ApprovalsPage() {
             <SelectItem value="storage">Storage</SelectItem>
             <SelectItem value="archival">Archival</SelectItem>
             <SelectItem value="organization">Organization</SelectItem>
+            <SelectItem value="user_deletion">User Deletion</SelectItem>
+            <SelectItem value="domain_deletion">Domain Deletion</SelectItem>
+            <SelectItem value="alias_deletion">Alias Deletion</SelectItem>
           </SelectContent>
         </Select>
 
@@ -279,7 +289,8 @@ export default function ApprovalsPage() {
                           request.type === 'user' && 'bg-green-100 dark:bg-green-900',
                           request.type === 'storage' && 'bg-purple-100 dark:bg-purple-900',
                           request.type === 'archival' && 'bg-orange-100 dark:bg-orange-900',
-                          request.type === 'organization' && 'bg-gray-100 dark:bg-gray-700'
+                          request.type === 'organization' && 'bg-gray-100 dark:bg-gray-700',
+                          request.type.includes('_deletion') && 'bg-red-100 dark:bg-red-900'
                         )}
                       >
                         <Icon
@@ -289,7 +300,8 @@ export default function ApprovalsPage() {
                             request.type === 'user' && 'text-green-600 dark:text-green-400',
                             request.type === 'storage' && 'text-purple-600 dark:text-purple-400',
                             request.type === 'archival' && 'text-orange-600 dark:text-orange-400',
-                            request.type === 'organization' && 'text-gray-600 dark:text-gray-400'
+                            request.type === 'organization' && 'text-gray-600 dark:text-gray-400',
+                            request.type.includes('_deletion') && 'text-red-600 dark:text-red-400'
                           )}
                         />
                       </div>
@@ -360,6 +372,58 @@ export default function ApprovalsPage() {
                               </p>
                             </div>
                           )}
+                          {request.type === 'user_deletion' && (
+                            <div className="space-y-1">
+                              <p>
+                                <span className="text-gray-500">Email (to delete from Mailcow):</span>{' '}
+                                <span className="font-medium text-red-600 dark:text-red-400">
+                                  {requestData.emailAddress}
+                                </span>
+                              </p>
+                              {requestData.displayName && (
+                                <p>
+                                  <span className="text-gray-500">Name:</span>{' '}
+                                  <span className="text-gray-900 dark:text-white">
+                                    {requestData.displayName}
+                                  </span>
+                                </p>
+                              )}
+                              {(requestData.mailboxStorageBytes || requestData.driveStorageBytes) && (
+                                <p>
+                                  <span className="text-gray-500">Storage to release:</span>{' '}
+                                  <span className="text-gray-900 dark:text-white">
+                                    {formatBytes((requestData.mailboxStorageBytes || 0) + (requestData.driveStorageBytes || 0))}
+                                  </span>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          {request.type === 'domain_deletion' && (
+                            <div className="space-y-1">
+                              <p>
+                                <span className="text-gray-500">Domain (to delete from Mailcow):</span>{' '}
+                                <span className="font-medium text-red-600 dark:text-red-400">
+                                  {requestData.domainName}
+                                </span>
+                              </p>
+                            </div>
+                          )}
+                          {request.type === 'alias_deletion' && (
+                            <div className="space-y-1">
+                              <p>
+                                <span className="text-gray-500">Alias ID (to delete from Mailcow):</span>{' '}
+                                <span className="font-medium text-red-600 dark:text-red-400">
+                                  {requestData.aliasId}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-gray-500">Alias:</span>{' '}
+                                <span className="text-gray-900 dark:text-white">
+                                  {requestData.aliasAddress} → {requestData.gotoAddress}
+                                </span>
+                              </p>
+                            </div>
+                          )}
                           {requestData.organizationName && (
                             <p className="text-gray-500 mt-1">
                               Organization: {requestData.organizationName}
@@ -386,10 +450,28 @@ export default function ApprovalsPage() {
                             }
                           }}
                           disabled={processing}
-                          className="text-green-600 hover:text-green-700"
+                          className={cn(
+                            request.type.includes('_deletion')
+                              ? 'text-red-600 hover:text-red-700'
+                              : 'text-green-600 hover:text-green-700'
+                          )}
                         >
-                          <Check className="h-4 w-4 mr-1" />
-                          {request.type === 'user' ? 'Configure & Approve' : 'Approve'}
+                          {request.type.includes('_deletion') ? (
+                            <>
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Confirm Deleted
+                            </>
+                          ) : request.type === 'user' ? (
+                            <>
+                              <Check className="h-4 w-4 mr-1" />
+                              Configure & Approve
+                            </>
+                          ) : (
+                            <>
+                              <Check className="h-4 w-4 mr-1" />
+                              Approve
+                            </>
+                          )}
                         </Button>
                         <Button
                           variant="outline"
@@ -399,10 +481,14 @@ export default function ApprovalsPage() {
                             setRejectDialogOpen(true);
                           }}
                           disabled={processing}
-                          className="text-red-600 hover:text-red-700"
+                          className={cn(
+                            request.type.includes('_deletion')
+                              ? 'text-gray-600 hover:text-gray-700'
+                              : 'text-red-600 hover:text-red-700'
+                          )}
                         >
                           <X className="h-4 w-4 mr-1" />
-                          Reject
+                          {request.type.includes('_deletion') ? 'Cancel Request' : 'Reject'}
                         </Button>
                       </div>
                     )}

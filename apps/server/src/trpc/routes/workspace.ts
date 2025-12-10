@@ -23,7 +23,12 @@ import {
   invoiceLineItem,
   approvalRequest,
   emailArchival,
+  user,
+  account,
 } from '../../db/schema';
+import { mailcowApi } from '../../lib/mailcow';
+import { verifyDomainDns } from '../../lib/dns-verify';
+import { hashPassword } from '../../lib/auth-utils';
 
 // Workspace middleware - checks if user is an organization owner/admin
 const workspaceMiddleware = privateProcedure.use(async ({ ctx, next }) => {
@@ -103,7 +108,7 @@ export const workspaceRouter = router({
     const { db, organization: org, isOwner } = ctx;
 
     // Get counts in parallel
-    const [userCount, domainCount, activeDomains, pendingUsers] = await Promise.all([
+    const [userCount, domainCount, activeDomains, _pendingUsers] = await Promise.all([
       db
         .select({ count: count() })
         .from(organizationUser)
@@ -137,17 +142,25 @@ export const workspaceRouter = router({
     const storagePercentage = totalStorage > 0 ? (usedStorage / totalStorage) * 100 : 0;
 
     return {
-      organizationName: org.name,
+      organization: {
+        id: org.id,
+        name: org.name,
+        slug: org.id,
+        status: org.isActive ? 'active' : 'suspended',
+        allocatedStorageBytes: totalStorage,
+        usedStorageBytes: usedStorage,
+      },
       isOwner,
       userCount: userCount[0]?.count ?? 0,
       domainCount: domainCount[0]?.count ?? 0,
       activeDomains: activeDomains[0]?.count ?? 0,
-      pendingUsers: pendingUsers[0]?.count ?? 0,
+      pendingInvoices: 0, // TODO: implement pending invoices count
+      archivalEnabled: false, // TODO: check if any domain has archival enabled
       storage: {
-        total: totalStorage,
+        allocated: totalStorage,
         used: usedStorage,
         percentage: Math.round(storagePercentage * 100) / 100,
-        totalFormatted: formatBytes(totalStorage),
+        allocatedFormatted: formatBytes(totalStorage),
         usedFormatted: formatBytes(usedStorage),
       },
     };
@@ -194,11 +207,34 @@ export const workspaceRouter = router({
   getDomains: workspaceMiddleware.query(async ({ ctx }) => {
     const { db, organization: org } = ctx;
 
-    return db
+    const domains = await db
       .select()
       .from(organizationDomain)
       .where(eq(organizationDomain.organizationId, org.id))
       .orderBy(desc(organizationDomain.isPrimary), asc(organizationDomain.createdAt));
+
+    // Map backend status to frontend verification status
+    const mapStatus = (status: string | null): string => {
+      if (status === 'active') return 'verified';
+      if (status === 'pending') return 'pending';
+      if (status === 'failed') return 'failed';
+      return 'pending';
+    };
+
+    return {
+      domains: domains.map((d) => ({
+        id: d.id,
+        domainName: d.domainName,
+        verificationStatus: mapStatus(d.status),
+        dnsVerified: d.dnsVerified ?? false,
+        mxVerified: d.dnsVerified ?? false, // Using dnsVerified as proxy
+        spfVerified: d.dnsVerified ?? false,
+        dkimVerified: d.dnsVerified ?? false,
+        dmarcVerified: d.dnsVerified ?? false,
+        isPrimary: d.isPrimary ?? false,
+        createdAt: d.createdAt?.toISOString() || new Date().toISOString(),
+      })),
+    };
   }),
 
   getDomainById: workspaceMiddleware
@@ -372,21 +408,65 @@ export const workspaceRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
       }
 
-      // TODO: Implement actual DNS verification using DNS lookup
-      // For now, just mark as verified for testing purposes
-      // In production, you'd check MX, SPF, DKIM, DMARC records
+      // Perform actual DNS verification
+      const dnsResult = await verifyDomainDns(domain[0].domainName, {
+        expectedMx: 'mail.nubo.email',
+        expectedSpfInclude: '_spf.nubo.email',
+        dkimSelector: domain[0].dkimSelector || 'dkim',
+      });
+
+      // Update domain with verification results
+      const updates: Record<string, unknown> = {
+        updatedAt: new Date(),
+      };
+
+      // If all DNS records are verified, mark domain as active
+      if (dnsResult.allVerified) {
+        updates.dnsVerified = true;
+        updates.dnsVerifiedAt = new Date();
+        updates.status = 'active';
+
+        // Create domain in Mailcow if not already exists
+        try {
+          const domainExists = await mailcowApi.domainExists(domain[0].domainName);
+          if (!domainExists) {
+            await mailcowApi.createDomain({
+              domain: domain[0].domainName,
+              description: `Organization: ${org.name}`,
+              defquota: 1024, // 1GB default
+              maxquota: 10240, // 10GB max
+              quota: 10240, // 10GB total
+            });
+
+            // Generate DKIM key
+            await mailcowApi.generateDkim({
+              domain: domain[0].domainName,
+              dkim_selector: 'dkim',
+            });
+          }
+        } catch (mailcowError) {
+          console.error('Failed to create domain in Mailcow:', mailcowError);
+          // Don't fail the verification, just log the error
+        }
+      } else {
+        updates.status = 'dns_pending';
+      }
 
       await db
         .update(organizationDomain)
-        .set({
-          dnsVerified: true,
-          dnsVerifiedAt: new Date(),
-          status: 'active',
-          updatedAt: new Date(),
-        })
+        .set(updates)
         .where(eq(organizationDomain.id, input.domainId));
 
-      return { success: true, verified: true };
+      return {
+        success: true,
+        verified: dnsResult.allVerified,
+        results: {
+          mx: { verified: dnsResult.mx.verified, records: dnsResult.mx.records },
+          spf: { verified: dnsResult.spf.verified, record: dnsResult.spf.record },
+          dkim: { verified: dnsResult.dkim.verified, record: dnsResult.dkim.record },
+          dmarc: { verified: dnsResult.dmarc.verified, record: dnsResult.dmarc.record },
+        },
+      };
     }),
 
   // ======================= Users =======================
@@ -435,8 +515,20 @@ export const workspaceRouter = router({
         db.select({ count: count() }).from(organizationUser).where(whereConditions),
       ]);
 
+      // Transform users to match frontend expectations
+      const transformedUsers = users.map((u) => ({
+        id: u.id,
+        emailAddress: u.emailAddress,
+        displayName: u.displayName || u.emailAddress.split('@')[0],
+        role: 'member', // Default role - organization owners are handled differently
+        status: u.status || 'pending',
+        storageUsedBytes: Number(u.mailboxUsedBytes || 0) + Number(u.driveUsedBytes || 0),
+        hasProSubscription: u.hasProSubscription || false,
+        createdAt: u.createdAt?.toISOString() || new Date().toISOString(),
+      }));
+
       return {
-        users,
+        users: transformedUsers,
         total: totalCount[0]?.count ?? 0,
         page: input.page,
         limit: input.limit,
@@ -483,6 +575,7 @@ export const workspaceRouter = router({
         domainId: z.string(),
         emailAddress: z.string().email(),
         displayName: z.string().optional(),
+        password: z.string().min(8, 'Password must be at least 8 characters'),
         mailboxStorageBytes: z.number().optional(),
         driveStorageBytes: z.number().optional(),
       })
@@ -530,18 +623,30 @@ export const workspaceRouter = router({
         });
       }
 
-      // Check if email already exists
-      const existingUser = await db
+      // Check if email already exists in organizationUser
+      const existingOrgUser = await db
         .select()
         .from(organizationUser)
         .where(eq(organizationUser.emailAddress, input.emailAddress.toLowerCase()))
         .limit(1);
 
-      if (existingUser.length) {
+      if (existingOrgUser.length) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Email address already exists' });
       }
 
+      // Check if email already exists in main user table
+      const existingMainUser = await db
+        .select()
+        .from(user)
+        .where(eq(user.email, input.emailAddress.toLowerCase()))
+        .limit(1);
+
+      if (existingMainUser.length) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Email address already registered' });
+      }
+
       // Check storage availability
+      const quotaMB = input.mailboxStorageBytes ? Math.floor(input.mailboxStorageBytes / (1024 * 1024)) : 1024;
       const totalUserStorage = (input.mailboxStorageBytes ?? 0) + (input.driveStorageBytes ?? 0);
       const availableStorage = Number(org.totalStorageBytes) - Number(org.usedStorageBytes);
       if (totalUserStorage > availableStorage) {
@@ -551,20 +656,82 @@ export const workspaceRouter = router({
         });
       }
 
-      const userId = crypto.randomUUID();
-      const username = input.emailAddress.split('@')[0];
-      const nuboUsername = `${username}@nubo.email`;
+      const orgUserId = crypto.randomUUID();
+      const mainUserId = crypto.randomUUID();
+      const localPart = input.emailAddress.split('@')[0];
+      const emailLower = input.emailAddress.toLowerCase();
 
+      // 1. Create mailbox in Mailcow
+      try {
+        const mailcowResult = await mailcowApi.createMailbox({
+          local_part: localPart,
+          domain: domain[0].domainName,
+          name: input.displayName || localPart,
+          password: input.password,
+          quota: quotaMB,
+        });
+
+        if (mailcowResult.type === 'error' || mailcowResult.type === 'danger') {
+          throw new Error(
+            Array.isArray(mailcowResult.msg) ? mailcowResult.msg.join(', ') : mailcowResult.msg || 'Failed to create mailbox'
+          );
+        }
+      } catch (mailcowError) {
+        console.error('Failed to create mailbox in Mailcow:', mailcowError);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to create mailbox: ${mailcowError instanceof Error ? mailcowError.message : 'Unknown error'}`,
+        });
+      }
+
+      // 2. Create user in main user table (for login to /mail/inbox)
+      const hashedPassword = await hashPassword(input.password);
+
+      await db.insert(user).values({
+        id: mainUserId,
+        email: emailLower,
+        name: input.displayName || localPart,
+        emailVerified: true, // Pre-verified since created by org owner
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // 3. Create account record for credential login
+      await db.insert(account).values({
+        id: crypto.randomUUID(),
+        userId: mainUserId,
+        accountId: mainUserId,
+        providerId: 'credential',
+        password: hashedPassword,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // 4. Get IMAP/SMTP config
+      const mailConfig = mailcowApi.getMailboxConfig(emailLower);
+
+      // 5. Create organization user record
       await db.insert(organizationUser).values({
-        id: userId,
+        id: orgUserId,
         organizationId: org.id,
         domainId: input.domainId,
-        emailAddress: input.emailAddress.toLowerCase(),
-        nuboUsername,
+        userId: mainUserId, // Link to main user table
+        emailAddress: emailLower,
         displayName: input.displayName,
-        mailboxStorageBytes: input.mailboxStorageBytes ?? 0,
+        mailboxStorageBytes: input.mailboxStorageBytes ?? 1073741824, // 1GB default
         driveStorageBytes: input.driveStorageBytes ?? 0,
-        status: 'pending',
+        // IMAP/SMTP credentials
+        imapHost: mailConfig.imap.host,
+        imapPort: mailConfig.imap.port,
+        imapUsername: emailLower,
+        imapPasswordEncrypted: input.password, // TODO: Encrypt this
+        smtpHost: mailConfig.smtp.host,
+        smtpPort: mailConfig.smtp.port,
+        smtpUsername: emailLower,
+        smtpPasswordEncrypted: input.password, // TODO: Encrypt this
+        status: 'active', // Active immediately since mailbox is created
+        provisionedBy: ctx.sessionUser.id,
+        provisionedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -580,27 +747,24 @@ export const workspaceRouter = router({
           .where(eq(organization.id, org.id));
       }
 
-      // Create approval request if organization has a partner
-      if (org.partnerId) {
-        await db.insert(approvalRequest).values({
-          id: crypto.randomUUID(),
-          type: 'user',
-          requestorType: 'organization',
-          requestorOrganizationId: org.id,
-          targetOrganizationId: org.id,
-          targetUserId: userId,
-          requestData: {
-            emailAddress: input.emailAddress,
-            displayName: input.displayName,
-            organizationName: org.name,
-          },
-          status: 'pending',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-      }
-
-      return { success: true, userId, nuboUsername };
+      return {
+        success: true,
+        userId: orgUserId,
+        mainUserId,
+        emailAddress: emailLower,
+        imapConfig: {
+          host: mailConfig.imap.host,
+          port: mailConfig.imap.port,
+          security: mailConfig.imap.security,
+          username: emailLower,
+        },
+        smtpConfig: {
+          host: mailConfig.smtp.host,
+          port: mailConfig.smtp.port,
+          security: mailConfig.smtp.security,
+          username: emailLower,
+        },
+      };
     }),
 
   updateUser: workspaceMiddleware
@@ -997,7 +1161,7 @@ export const workspaceRouter = router({
       }
 
       // Verify user belongs to organization
-      const user = await db
+      const orgUser = await db
         .select()
         .from(organizationUser)
         .where(
@@ -1008,7 +1172,7 @@ export const workspaceRouter = router({
         )
         .limit(1);
 
-      if (!user.length) {
+      if (!orgUser.length) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
@@ -1018,6 +1182,387 @@ export const workspaceRouter = router({
           hasProSubscription: false,
           proSubscriptionType: null,
           proSubscriptionExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(organizationUser.id, input.userId));
+
+      return { success: true };
+    }),
+
+  // ======================= Delete Operations =======================
+
+  deleteUser: workspaceMiddleware
+    .input(z.object({ userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can delete users',
+        });
+      }
+
+      // Get user details
+      const orgUser = await db
+        .select()
+        .from(organizationUser)
+        .where(
+          and(
+            eq(organizationUser.id, input.userId),
+            eq(organizationUser.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!orgUser.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const userRecord = orgUser[0];
+
+      // Create approval request for admin to delete mailbox manually
+      await db.insert(approvalRequest).values({
+        id: crypto.randomUUID(),
+        type: 'user_deletion',
+        requestorType: 'organization',
+        requestorOrganizationId: org.id,
+        targetOrganizationId: org.id,
+        targetUserId: input.userId,
+        requestData: {
+          emailAddress: userRecord.emailAddress,
+          displayName: userRecord.displayName,
+          organizationName: org.name,
+          action: 'delete_mailbox',
+          mailboxStorageBytes: userRecord.mailboxStorageBytes,
+          driveStorageBytes: userRecord.driveStorageBytes,
+        },
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // Mark user as pending deletion
+      await db
+        .update(organizationUser)
+        .set({
+          status: 'pending_deletion',
+          updatedAt: new Date(),
+        })
+        .where(eq(organizationUser.id, input.userId));
+
+      return { success: true, message: 'Delete request sent to admin for approval' };
+    }),
+
+  deleteDomain: workspaceMiddleware
+    .input(z.object({ domainId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can delete domains',
+        });
+      }
+
+      // Get domain details
+      const domain = await db
+        .select()
+        .from(organizationDomain)
+        .where(
+          and(
+            eq(organizationDomain.id, input.domainId),
+            eq(organizationDomain.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!domain.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
+      }
+
+      // Check if domain has active users
+      const domainUsers = await db
+        .select({ count: count() })
+        .from(organizationUser)
+        .where(
+          and(
+            eq(organizationUser.domainId, input.domainId),
+            eq(organizationUser.status, 'active')
+          )
+        );
+
+      if ((domainUsers[0]?.count ?? 0) > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Cannot delete domain with active users. Please delete all users first.',
+        });
+      }
+
+      // Create approval request for admin to delete domain manually
+      await db.insert(approvalRequest).values({
+        id: crypto.randomUUID(),
+        type: 'domain_deletion',
+        requestorType: 'organization',
+        requestorOrganizationId: org.id,
+        targetOrganizationId: org.id,
+        targetDomainId: input.domainId,
+        requestData: {
+          domainName: domain[0].domainName,
+          organizationName: org.name,
+          action: 'delete_domain',
+        },
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // Mark domain as pending deletion
+      await db
+        .update(organizationDomain)
+        .set({
+          status: 'pending_deletion',
+          updatedAt: new Date(),
+        })
+        .where(eq(organizationDomain.id, input.domainId));
+
+      return { success: true, message: 'Delete request sent to admin for approval' };
+    }),
+
+  // ======================= Alias Management =======================
+
+  getAliases: workspaceMiddleware
+    .input(z.object({ domainId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const { db, organization: org } = ctx;
+
+      // Verify domain belongs to organization
+      const domain = await db
+        .select()
+        .from(organizationDomain)
+        .where(
+          and(
+            eq(organizationDomain.id, input.domainId),
+            eq(organizationDomain.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!domain.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
+      }
+
+      // Get aliases from Mailcow
+      try {
+        const aliases = await mailcowApi.getAliasesByDomain(domain[0].domainName);
+        return {
+          aliases: aliases.map(a => ({
+            id: a.id,
+            address: a.address,
+            goto: a.goto,
+            active: a.active === 1,
+            created: a.created,
+            modified: a.modified,
+          })),
+        };
+      } catch (error) {
+        console.error('Failed to get aliases from Mailcow:', error);
+        return { aliases: [] };
+      }
+    }),
+
+  createAlias: workspaceMiddleware
+    .input(
+      z.object({
+        domainId: z.string(),
+        aliasAddress: z.string().email('Invalid alias address'),
+        gotoAddress: z.string().email('Invalid destination address'),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can create aliases',
+        });
+      }
+
+      // Verify domain belongs to organization
+      const domain = await db
+        .select()
+        .from(organizationDomain)
+        .where(
+          and(
+            eq(organizationDomain.id, input.domainId),
+            eq(organizationDomain.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!domain.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
+      }
+
+      // Verify alias address matches domain
+      const aliasDomain = input.aliasAddress.split('@')[1];
+      if (aliasDomain?.toLowerCase() !== domain[0].domainName.toLowerCase()) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Alias address must match the domain',
+        });
+      }
+
+      // Create alias in Mailcow
+      try {
+        const result = await mailcowApi.createAlias({
+          address: input.aliasAddress,
+          goto: input.gotoAddress,
+        });
+
+        if (result.type === 'error' || result.type === 'danger') {
+          throw new Error(
+            Array.isArray(result.msg) ? result.msg.join(', ') : result.msg || 'Failed to create alias'
+          );
+        }
+
+        return { success: true };
+      } catch (error) {
+        console.error('Failed to create alias in Mailcow:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to create alias: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        });
+      }
+    }),
+
+  deleteAlias: workspaceMiddleware
+    .input(
+      z.object({
+        domainId: z.string(),
+        aliasId: z.number(),
+        aliasAddress: z.string().email(),
+        gotoAddress: z.string().email(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can delete aliases',
+        });
+      }
+
+      // Verify domain belongs to organization
+      const domain = await db
+        .select()
+        .from(organizationDomain)
+        .where(
+          and(
+            eq(organizationDomain.id, input.domainId),
+            eq(organizationDomain.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!domain.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
+      }
+
+      // Create approval request for admin to delete alias manually
+      await db.insert(approvalRequest).values({
+        id: crypto.randomUUID(),
+        type: 'alias_deletion',
+        requestorType: 'organization',
+        requestorOrganizationId: org.id,
+        targetOrganizationId: org.id,
+        targetDomainId: input.domainId,
+        requestData: {
+          aliasId: input.aliasId,
+          aliasAddress: input.aliasAddress,
+          gotoAddress: input.gotoAddress,
+          domainName: domain[0].domainName,
+          organizationName: org.name,
+          action: 'delete_alias',
+        },
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      return { success: true, message: 'Delete request sent to admin for approval' };
+    }),
+
+  // ======================= Password Management =======================
+
+  resetUserPassword: workspaceMiddleware
+    .input(
+      z.object({
+        userId: z.string(),
+        newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can reset passwords',
+        });
+      }
+
+      // Get user details
+      const orgUser = await db
+        .select()
+        .from(organizationUser)
+        .where(
+          and(
+            eq(organizationUser.id, input.userId),
+            eq(organizationUser.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!orgUser.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const userRecord = orgUser[0];
+
+      // 1. Update password in Mailcow
+      try {
+        await mailcowApi.updateMailboxPassword(userRecord.emailAddress, input.newPassword);
+      } catch (mailcowError) {
+        console.error('Failed to update password in Mailcow:', mailcowError);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update mailbox password',
+        });
+      }
+
+      // 2. Update password in main user table if linked
+      if (userRecord.userId) {
+        const hashedPassword = await hashPassword(input.newPassword);
+        await db
+          .update(account)
+          .set({
+            password: hashedPassword,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(account.userId, userRecord.userId), eq(account.providerId, 'credential')));
+      }
+
+      // 3. Update stored credentials (TODO: encrypt these)
+      await db
+        .update(organizationUser)
+        .set({
+          imapPasswordEncrypted: input.newPassword,
+          smtpPasswordEncrypted: input.newPassword,
           updatedAt: new Date(),
         })
         .where(eq(organizationUser.id, input.userId));
