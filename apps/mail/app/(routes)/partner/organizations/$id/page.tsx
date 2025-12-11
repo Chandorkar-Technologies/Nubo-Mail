@@ -145,6 +145,28 @@ export default function OrganizationDetailPage() {
   const [userToDelete, setUserToDelete] = useState<OrganizationUser | null>(null);
   const [deletingUser, setDeletingUser] = useState(false);
 
+  // Edit domain dialog
+  const [editDomainDialogOpen, setEditDomainDialogOpen] = useState(false);
+  const [domainToEdit, setDomainToEdit] = useState<Domain | null>(null);
+  const [editDomainQuotaGB, setEditDomainQuotaGB] = useState(10);
+  const [editMaxQuotaPerMailboxMB, setEditMaxQuotaPerMailboxMB] = useState(10240);
+  const [editDefaultQuotaPerMailboxMB, setEditDefaultQuotaPerMailboxMB] = useState(1024);
+  const [editMaxMailboxes, setEditMaxMailboxes] = useState(0);
+  const [editRateLimitPerHour, setEditRateLimitPerHour] = useState(500);
+  const [editDomainActive, setEditDomainActive] = useState(true);
+  const [updatingDomain, setUpdatingDomain] = useState(false);
+
+  // Edit user dialog
+  const [editUserDialogOpen, setEditUserDialogOpen] = useState(false);
+  const [userToEdit, setUserToEdit] = useState<OrganizationUser | null>(null);
+  const [editUserDisplayName, setEditUserDisplayName] = useState('');
+  const [editUserPassword, setEditUserPassword] = useState('');
+  const [editUserConfirmPassword, setEditUserConfirmPassword] = useState('');
+  const [editUserMailboxStorage, setEditUserMailboxStorage] = useState(5);
+  const [editUserDriveStorage, setEditUserDriveStorage] = useState(5);
+  const [editUserStatus, setEditUserStatus] = useState<'active' | 'suspended'>('active');
+  const [updatingUser, setUpdatingUser] = useState(false);
+
   // Edit storage dialog
   const [editStorageDialogOpen, setEditStorageDialogOpen] = useState(false);
   const [newStorageGB, setNewStorageGB] = useState(0);
@@ -464,6 +486,93 @@ export default function OrganizationDetailPage() {
     }
   };
 
+  // =============== Edit Domain ===============
+
+  const openEditDomainDialog = (domain: Domain) => {
+    setDomainToEdit(domain);
+    // TODO: We'd need domain details from backend to populate these
+    // For now using defaults - ideally fetch from domain record
+    setEditDomainQuotaGB(10);
+    setEditMaxQuotaPerMailboxMB(10240);
+    setEditDefaultQuotaPerMailboxMB(1024);
+    setEditMaxMailboxes(0);
+    setEditRateLimitPerHour(500);
+    setEditDomainActive(domain.status === 'active');
+    setEditDomainDialogOpen(true);
+  };
+
+  const handleUpdateDomain = async () => {
+    if (!domainToEdit) return;
+    setUpdatingDomain(true);
+    try {
+      await api.partner.updateDomain.mutate({
+        domainId: domainToEdit.id,
+        domainQuotaGB: editDomainQuotaGB,
+        maxQuotaPerMailboxMB: editMaxQuotaPerMailboxMB,
+        defaultQuotaPerMailboxMB: editDefaultQuotaPerMailboxMB,
+        maxMailboxes: editMaxMailboxes,
+        rateLimitPerHour: editRateLimitPerHour,
+        mailcowActive: editDomainActive,
+      });
+      toast.success('Domain updated successfully');
+      setEditDomainDialogOpen(false);
+      setDomainToEdit(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update domain');
+    } finally {
+      setUpdatingDomain(false);
+    }
+  };
+
+  // =============== Edit User ===============
+
+  const openEditUserDialog = (user: OrganizationUser) => {
+    setUserToEdit(user);
+    setEditUserDisplayName(user.displayName || '');
+    setEditUserPassword('');
+    setEditUserConfirmPassword('');
+    setEditUserMailboxStorage(Math.round(user.mailboxStorageBytes / (1024 * 1024 * 1024)));
+    setEditUserDriveStorage(Math.round(user.driveStorageBytes / (1024 * 1024 * 1024)));
+    setEditUserStatus(user.status === 'suspended' ? 'suspended' : 'active');
+    setEditUserDialogOpen(true);
+  };
+
+  const handleUpdateUser = async () => {
+    if (!userToEdit) return;
+
+    // Validate password if provided
+    if (editUserPassword && editUserPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+
+    if (editUserPassword && editUserPassword !== editUserConfirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    setUpdatingUser(true);
+    try {
+      await api.partner.updateUser.mutate({
+        userId: userToEdit.id,
+        displayName: editUserDisplayName || undefined,
+        password: editUserPassword || undefined,
+        mailboxStorageBytes: editUserMailboxStorage * 1024 * 1024 * 1024,
+        driveStorageBytes: editUserDriveStorage * 1024 * 1024 * 1024,
+        status: editUserStatus,
+      });
+      toast.success('User updated successfully');
+      setEditUserDialogOpen(false);
+      setUserToEdit(null);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update user');
+    } finally {
+      setUpdatingUser(false);
+    }
+  };
+
   // =============== Render ===============
 
   if (loading) {
@@ -697,6 +806,16 @@ export default function OrganizationDetailPage() {
                     <span className={cn('px-2 py-1 rounded text-xs font-medium', getStatusBadge(domain.status))}>
                       {domain.status === 'dns_pending' ? 'DNS Pending' : domain.status.charAt(0).toUpperCase() + domain.status.slice(1)}
                     </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditDomainDialog(domain);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -984,6 +1103,13 @@ export default function OrganizationDetailPage() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditUserDialog(user)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1456,6 +1582,205 @@ export default function OrganizationDetailPage() {
             </Button>
             <Button onClick={handleUpdateBilling} disabled={updatingBilling}>
               {updatingBilling ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Domain Dialog */}
+      <Dialog open={editDomainDialogOpen} onOpenChange={setEditDomainDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Domain</DialogTitle>
+            <DialogDescription>
+              Update settings for {domainToEdit?.domainName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="editDomainQuota">Domain Storage Quota (GB)</Label>
+              <Input
+                id="editDomainQuota"
+                type="number"
+                min={1}
+                value={editDomainQuotaGB}
+                onChange={(e) => setEditDomainQuotaGB(Number(e.target.value))}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="editDefaultQuota">Default Mailbox Quota (MB)</Label>
+              <Input
+                id="editDefaultQuota"
+                type="number"
+                min={100}
+                value={editDefaultQuotaPerMailboxMB}
+                onChange={(e) => setEditDefaultQuotaPerMailboxMB(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">Default storage for new mailboxes</p>
+            </div>
+
+            <div>
+              <Label htmlFor="editMaxQuota">Max Quota Per Mailbox (MB)</Label>
+              <Input
+                id="editMaxQuota"
+                type="number"
+                min={100}
+                value={editMaxQuotaPerMailboxMB}
+                onChange={(e) => setEditMaxQuotaPerMailboxMB(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">Maximum storage any mailbox can have</p>
+            </div>
+
+            <div>
+              <Label htmlFor="editMaxMailboxes">Max Mailboxes</Label>
+              <Input
+                id="editMaxMailboxes"
+                type="number"
+                min={0}
+                value={editMaxMailboxes}
+                onChange={(e) => setEditMaxMailboxes(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">0 = unlimited mailboxes</p>
+            </div>
+
+            <div>
+              <Label htmlFor="editRateLimit">Rate Limit (emails/hour)</Label>
+              <Input
+                id="editRateLimit"
+                type="number"
+                min={0}
+                value={editRateLimitPerHour}
+                onChange={(e) => setEditRateLimitPerHour(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">Max emails per hour (0 = unlimited)</p>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div>
+                <Label>Domain Active</Label>
+                <p className="text-xs text-gray-500">Enable or disable this domain in Mailcow</p>
+              </div>
+              <Switch
+                checked={editDomainActive}
+                onCheckedChange={setEditDomainActive}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDomainDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateDomain} disabled={updatingDomain}>
+              {updatingDomain ? 'Updating...' : 'Update Domain'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      <Dialog open={editUserDialogOpen} onOpenChange={setEditUserDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>
+              Update settings for {userToEdit?.emailAddress}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="editDisplayName">Display Name</Label>
+              <Input
+                id="editDisplayName"
+                placeholder="John Doe"
+                value={editUserDisplayName}
+                onChange={(e) => setEditUserDisplayName(e.target.value)}
+              />
+            </div>
+
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-medium mb-3">Change Password (optional)</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="editPassword">New Password</Label>
+                  <Input
+                    id="editPassword"
+                    type="password"
+                    placeholder="Min 8 characters"
+                    value={editUserPassword}
+                    onChange={(e) => setEditUserPassword(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="editConfirmPassword">Confirm Password</Label>
+                  <Input
+                    id="editConfirmPassword"
+                    type="password"
+                    placeholder="Retype password"
+                    value={editUserConfirmPassword}
+                    onChange={(e) => setEditUserConfirmPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+              {editUserPassword && editUserConfirmPassword && editUserPassword !== editUserConfirmPassword && (
+                <p className="text-xs text-red-500 mt-2">Passwords do not match</p>
+              )}
+              <p className="text-xs text-gray-500 mt-2">Leave blank to keep current password</p>
+            </div>
+
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-medium mb-3">Storage Allocation</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="editMailboxStorage">Mailbox Storage (GB)</Label>
+                  <Input
+                    id="editMailboxStorage"
+                    type="number"
+                    min={1}
+                    value={editUserMailboxStorage}
+                    onChange={(e) => setEditUserMailboxStorage(Number(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="editDriveStorage">Drive Storage (GB)</Label>
+                  <Input
+                    id="editDriveStorage"
+                    type="number"
+                    min={0}
+                    value={editUserDriveStorage}
+                    onChange={(e) => setEditUserDriveStorage(Number(e.target.value))}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-medium mb-3">Account Status</h4>
+              <Select value={editUserStatus} onValueChange={(v) => setEditUserStatus(v as 'active' | 'suspended')}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-1">Suspended users cannot login or send/receive emails</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUserDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUpdateUser}
+              disabled={
+                updatingUser ||
+                (editUserPassword !== '' && editUserPassword.length < 8) ||
+                (editUserPassword !== '' && editUserPassword !== editUserConfirmPassword)
+              }
+            >
+              {updatingUser ? 'Updating...' : 'Update User'}
             </Button>
           </DialogFooter>
         </DialogContent>
