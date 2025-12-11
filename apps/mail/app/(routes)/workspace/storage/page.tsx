@@ -1,5 +1,6 @@
 'use client';
 
+import { api } from '@/lib/trpc';
 import { useEffect, useState } from 'react';
 import {
   HardDrive,
@@ -29,38 +30,24 @@ export default function WorkspaceStoragePage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Mock storage stats until we add the endpoint
+        // Fetch dashboard stats for storage info
+        const dashboardData = await api.workspace.getDashboardStats.query();
+        const usersData = await api.workspace.getUsers.query({ limit: 100 });
+
+        const allocated = dashboardData.storage.allocated;
+        const used = dashboardData.storage.used;
+
         setStats({
-          allocatedBytes: 50 * 1024 * 1024 * 1024, // 50 GB
-          usedBytes: 23 * 1024 * 1024 * 1024, // 23 GB
-          availableBytes: 27 * 1024 * 1024 * 1024, // 27 GB
-          percentage: 46,
-          userBreakdown: [
-            {
-              id: '1',
-              displayName: 'John Doe',
-              emailAddress: 'john@example.com',
-              usedBytes: 8 * 1024 * 1024 * 1024,
-            },
-            {
-              id: '2',
-              displayName: 'Jane Smith',
-              emailAddress: 'jane@example.com',
-              usedBytes: 6 * 1024 * 1024 * 1024,
-            },
-            {
-              id: '3',
-              displayName: 'Bob Wilson',
-              emailAddress: 'bob@example.com',
-              usedBytes: 5 * 1024 * 1024 * 1024,
-            },
-            {
-              id: '4',
-              displayName: 'Alice Brown',
-              emailAddress: 'alice@example.com',
-              usedBytes: 4 * 1024 * 1024 * 1024,
-            },
-          ],
+          allocatedBytes: allocated,
+          usedBytes: used,
+          availableBytes: allocated - used,
+          percentage: dashboardData.storage.percentage,
+          userBreakdown: usersData.users.map((u) => ({
+            id: u.id,
+            displayName: u.displayName,
+            emailAddress: u.emailAddress,
+            usedBytes: u.storageUsedBytes,
+          })),
         });
       } catch (error) {
         console.error('Failed to fetch storage stats:', error);

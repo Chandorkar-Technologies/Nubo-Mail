@@ -50,12 +50,10 @@ export default function AdminOrganizationsPage() {
   const [search, setSearch] = useState('');
 
   // Dialog states
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [storageDialogOpen, setStorageDialogOpen] = useState(false);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
   const [partnerDialogOpen, setPartnerDialogOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
-  const [_orgDetails, _setOrgDetails] = useState<any>(null);
   const [newStorageGB, setNewStorageGB] = useState('');
   const [suspensionReason, setSuspensionReason] = useState('');
   const [partners, setPartners] = useState<Array<{ id: string; companyName: string }>>([]);
@@ -355,58 +353,6 @@ export default function AdminOrganizationsPage() {
           </tbody>
         </table>
       </div>
-
-      {/* View Details Dialog */}
-      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent showOverlay className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selectedOrg?.name}</DialogTitle>
-            <DialogDescription>Organization details and information</DialogDescription>
-          </DialogHeader>
-          {orgDetails && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Billing Email</p>
-                  <p className="text-gray-900 dark:text-white">{orgDetails.organization.billingEmail || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">GST Number</p>
-                  <p className="text-gray-900 dark:text-white">{orgDetails.organization.gstNumber || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Storage</p>
-                  <p className="text-gray-900 dark:text-white">
-                    {formatBytes(orgDetails.organization.usedStorageBytes)} / {formatBytes(orgDetails.organization.totalStorageBytes)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Users</p>
-                  <p className="text-gray-900 dark:text-white">{orgDetails.userCount}</p>
-                </div>
-              </div>
-              {orgDetails.domains && orgDetails.domains.length > 0 && (
-                <div>
-                  <h4 className="font-medium text-gray-900 dark:text-white mb-2">Domains</h4>
-                  <div className="space-y-2">
-                    {orgDetails.domains.map((domain: any) => (
-                      <div key={domain.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <span className="text-gray-900 dark:text-white">{domain.domain}</span>
-                        <span className={cn(
-                          'px-2 py-1 rounded text-xs',
-                          domain.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                        )}>
-                          {domain.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Manage Storage Dialog */}
       <Dialog open={storageDialogOpen} onOpenChange={setStorageDialogOpen}>

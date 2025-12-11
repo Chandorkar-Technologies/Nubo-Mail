@@ -78,7 +78,9 @@ export default function WorkspaceSettingsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      // This would call an update endpoint
+      await api.workspace.updateOrganization.mutate({
+        name: formData.name,
+      });
       toast.success('Settings saved successfully');
     } catch (error: any) {
       console.error('Failed to save settings:', error);

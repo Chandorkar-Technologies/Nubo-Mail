@@ -111,18 +111,18 @@ export default function WorkspaceDashboard() {
               Workspace Dashboard
             </h1>
             <p className="text-gray-500 dark:text-gray-400 mt-1">
-              Welcome to {stats?.organization.name}
+              Welcome to {stats?.organization?.name || 'your workspace'}
             </p>
           </div>
           <div
             className={cn(
               'px-3 py-1 rounded-full text-sm font-medium',
-              stats?.organization.status === 'active'
+              stats?.organization?.status === 'active'
                 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                 : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
             )}
           >
-            {stats?.organization.status === 'active' ? 'Active' : 'Pending'}
+            {stats?.organization?.status === 'active' ? 'Active' : 'Pending'}
           </div>
         </div>
       </div>
