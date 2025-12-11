@@ -160,7 +160,8 @@
     "DD_API_KEY": "",
     "DD_APP_KEY": "",
     "DD_SITE": "datadoghq.com",
-    "VAPID_PUBLIC_KEY": "BIUyPfKlTwnJ1INqE01zWA_1-lUHRvFvDRP0mRG4EkKIzq1JSgvJ70eur8UMEKPCI5nSEo5PBiOc9VMsYApXS9A"
+    "VAPID_PUBLIC_KEY": "BIUyPfKlTwnJ1INqE01zWA_1-lUHRvFvDRP0mRG4EkKIzq1JSgvJ70eur8UMEKPCI5nSEo5PBiOc9VMsYApXS9A",
+    "MAILCOW_API_URL": "https://mail.nubo.email"
   },
   "kv_namespaces": [
     {
