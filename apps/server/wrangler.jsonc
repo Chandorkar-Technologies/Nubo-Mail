@@ -638,6 +638,7 @@
         "DD_API_KEY": "",
         "DD_APP_KEY": "",
         "DD_SITE": "datadoghq.com",
+        "MAILCOW_API_URL": "https://mail.nubo.email",
       },
       "kv_namespaces": [
         {

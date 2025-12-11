@@ -647,6 +647,7 @@ export const partnerRouter = router({
       try {
         const domainExists = await mailcowApi.domainExists(input.domainName.toLowerCase());
         if (!domainExists) {
+          console.log('[Mailcow] Creating domain:', input.domainName.toLowerCase());
           const mailcowResult = await mailcowApi.createDomain({
             domain: input.domainName.toLowerCase(),
             description: `Organization: ${org[0].name}`,
@@ -658,20 +659,40 @@ export const partnerRouter = router({
             active: 1,
             relay_all_recipients: input.relayAllRecipients ? 1 : 0,
           });
+          console.log('[Mailcow] Domain creation result:', JSON.stringify(mailcowResult));
 
-          if (mailcowResult.type === 'success') {
+          // Check for success - Mailcow returns array of results
+          const results = Array.isArray(mailcowResult) ? mailcowResult : [mailcowResult];
+          const hasSuccess = results.some((r: { type?: string }) => r.type === 'success');
+          const hasError = results.some((r: { type?: string }) => r.type === 'danger' || r.type === 'error');
+
+          if (hasSuccess && !hasError) {
             mailcowCreated = true;
             // Generate DKIM key
+            console.log('[Mailcow] Generating DKIM for domain:', input.domainName.toLowerCase());
             await mailcowApi.generateDkim({
               domain: input.domainName.toLowerCase(),
               dkim_selector: 'dkim',
             });
+          } else if (hasError) {
+            const errorMsg = results.find((r: { type?: string }) => r.type === 'danger' || r.type === 'error');
+            console.error('[Mailcow] Domain creation failed:', errorMsg);
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: `Failed to create domain in mail server: ${JSON.stringify(errorMsg?.msg || 'Unknown error')}`,
+            });
           }
         } else {
+          console.log('[Mailcow] Domain already exists:', input.domainName.toLowerCase());
           mailcowCreated = true;
         }
       } catch (mailcowError) {
-        console.error('Failed to create domain in Mailcow:', mailcowError);
+        console.error('[Mailcow] Failed to create domain:', mailcowError);
+        if (mailcowError instanceof TRPCError) throw mailcowError;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to connect to mail server: ${mailcowError instanceof Error ? mailcowError.message : 'Unknown error'}`,
+        });
       }
 
       await db.insert(organizationDomain).values({
@@ -1323,6 +1344,7 @@ export const partnerRouter = router({
 
       // 1. Create mailbox in Mailcow
       try {
+        console.log('[Mailcow] Creating mailbox:', emailLower);
         const mailcowResult = await mailcowApi.createMailbox({
           local_part: localPart,
           domain: domain[0].domainName,
@@ -1330,14 +1352,21 @@ export const partnerRouter = router({
           password: input.password,
           quota: quotaMB,
         });
+        console.log('[Mailcow] Mailbox creation result:', JSON.stringify(mailcowResult));
 
-        if (mailcowResult.type === 'error' || mailcowResult.type === 'danger') {
+        // Check for errors - Mailcow can return array or single result
+        const results = Array.isArray(mailcowResult) ? mailcowResult : [mailcowResult];
+        const hasError = results.some((r: { type?: string }) => r.type === 'danger' || r.type === 'error');
+
+        if (hasError) {
+          const errorMsg = results.find((r: { type?: string }) => r.type === 'danger' || r.type === 'error');
           throw new Error(
-            Array.isArray(mailcowResult.msg) ? mailcowResult.msg.join(', ') : mailcowResult.msg || 'Failed to create mailbox'
+            Array.isArray(errorMsg?.msg) ? errorMsg.msg.join(', ') : errorMsg?.msg || 'Failed to create mailbox'
           );
         }
+        console.log('[Mailcow] Mailbox created successfully:', emailLower);
       } catch (mailcowError) {
-        console.error('Failed to create mailbox in Mailcow:', mailcowError);
+        console.error('[Mailcow] Failed to create mailbox:', mailcowError);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: `Failed to create mailbox: ${mailcowError instanceof Error ? mailcowError.message : 'Unknown error'}`,
