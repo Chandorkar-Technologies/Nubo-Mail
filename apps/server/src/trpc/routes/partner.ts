@@ -32,7 +32,7 @@ import {
 } from '../../db/schema';
 import { mailcowApi } from '../../lib/mailcow';
 import { verifyDomainDns } from '../../lib/dns-verify';
-import { hashPassword } from '../../lib/auth';
+import { hashPassword } from '../../lib/auth-utils';
 
 // Partner middleware - checks if user is a partner
 const partnerMiddleware = privateProcedure.use(async ({ ctx, next }) => {
