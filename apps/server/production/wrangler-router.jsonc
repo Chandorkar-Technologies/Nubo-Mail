@@ -3,7 +3,7 @@
   "name": "nubo-router",
   "compatibility_date": "2024-11-11",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/workers/api-router.ts",
+  "main": "../src/workers/api-router.ts",
   "observability": {
     "enabled": true
   },

@@ -3,7 +3,7 @@
   "name": "nubo-trpc",
   "compatibility_date": "2024-11-11",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/workers/trpc.ts",
+  "main": "../src/workers/trpc.ts",
   "routes": [
     { "pattern": "api.nubo.email/*", "zone_name": "nubo.email" }
   ],
