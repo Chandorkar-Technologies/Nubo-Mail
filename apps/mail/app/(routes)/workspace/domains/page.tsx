@@ -355,18 +355,24 @@ export default function WorkspaceDomainsPage() {
 
       {/* DNS Records Dialog */}
       <Dialog open={dnsDialogOpen} onOpenChange={setDnsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[85vh]">
           <DialogHeader>
             <DialogTitle>DNS Records for {selectedDomain?.domainName}</DialogTitle>
             <DialogDescription>
-              Add the following DNS records to your domain registrar
+              Add the following DNS records to your domain registrar to enable email services
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 max-h-96 overflow-y-auto">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {/* Required Records Section */}
+            <div className="border-b border-gray-200 dark:border-gray-700 pb-2">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Required Records</h3>
+            </div>
+
             {/* MX Records */}
             <div>
-              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                 MX Records
+                <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
               </h4>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
                 <div className="grid grid-cols-4 gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -375,29 +381,46 @@ export default function WorkspaceDomainsPage() {
                   <span>Value</span>
                   <span>Priority</span>
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-sm">
+                <div className="grid grid-cols-4 gap-2 text-sm items-center">
                   <span className="text-gray-900 dark:text-white">MX</span>
                   <span className="text-gray-600 dark:text-gray-300">@</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-600 dark:text-gray-300 truncate">
-                      mail.nubo.email
+                    <span className="text-gray-600 dark:text-gray-300 truncate font-mono text-xs">
+                      mx1.nubo.email
                     </span>
                     <button
-                      onClick={() => copyToClipboard('mail.nubo.email')}
-                      className="text-gray-400 hover:text-gray-600"
+                      onClick={() => copyToClipboard('mx1.nubo.email')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
                     >
                       <Copy className="h-3 w-3" />
                     </button>
                   </div>
                   <span className="text-gray-600 dark:text-gray-300">10</span>
                 </div>
+                <div className="grid grid-cols-4 gap-2 text-sm items-center">
+                  <span className="text-gray-900 dark:text-white">MX</span>
+                  <span className="text-gray-600 dark:text-gray-300">@</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-600 dark:text-gray-300 truncate font-mono text-xs">
+                      mx2.nubo.email
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard('mx2.nubo.email')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <span className="text-gray-600 dark:text-gray-300">20</span>
+                </div>
               </div>
             </div>
 
             {/* SPF Record */}
             <div>
-              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                SPF Record
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                SPF Record (TXT)
+                <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
               </h4>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                 <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -405,16 +428,16 @@ export default function WorkspaceDomainsPage() {
                   <span>Host</span>
                   <span>Value</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="grid grid-cols-3 gap-2 text-sm items-start">
                   <span className="text-gray-900 dark:text-white">TXT</span>
                   <span className="text-gray-600 dark:text-gray-300">@</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-600 dark:text-gray-300 truncate">
-                      v=spf1 include:_spf.nubo.email ~all
+                  <div className="flex items-start gap-1">
+                    <span className="text-gray-600 dark:text-gray-300 font-mono text-xs break-all">
+                      v=spf1 a mx ip4:46.224.135.53 ip6:2a01:4f8:c013:fd93::1 include:mailchannels.net -all
                     </span>
                     <button
-                      onClick={() => copyToClipboard('v=spf1 include:_spf.nubo.email ~all')}
-                      className="text-gray-400 hover:text-gray-600"
+                      onClick={() => copyToClipboard('v=spf1 a mx ip4:46.224.135.53 ip6:2a01:4f8:c013:fd93::1 include:mailchannels.net -all')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
                     >
                       <Copy className="h-3 w-3" />
                     </button>
@@ -425,8 +448,9 @@ export default function WorkspaceDomainsPage() {
 
             {/* DKIM Record */}
             <div>
-              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                DKIM Record
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                DKIM Record (TXT)
+                <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
               </h4>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                 <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -434,16 +458,55 @@ export default function WorkspaceDomainsPage() {
                   <span>Host</span>
                   <span>Value</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="grid grid-cols-3 gap-2 text-sm items-start">
                   <span className="text-gray-900 dark:text-white">TXT</span>
-                  <span className="text-gray-600 dark:text-gray-300">nubo._domainkey</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-600 dark:text-gray-300 truncate">
-                      v=DKIM1; k=rsa; p=...
+                  <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">dkim._domainkey</span>
+                  <div className="flex items-start gap-1">
+                    <span className="text-gray-600 dark:text-gray-300 font-mono text-xs break-all">
+                      {selectedDomain?.verificationStatus === 'verified'
+                        ? 'Contact admin for DKIM key or verify domain first'
+                        : 'DKIM key will be generated after domain verification'}
                     </span>
                     <button
-                      onClick={() => copyToClipboard('v=DKIM1; k=rsa; p=...')}
-                      className="text-gray-400 hover:text-gray-600"
+                      onClick={() => copyToClipboard('Contact admin for DKIM key')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                  Note: DKIM key is generated after domain verification. Contact support if you need the key.
+                </p>
+              </div>
+            </div>
+
+            {/* DMARC Record */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                DMARC Record (TXT)
+                <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
+              </h4>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  <span>Type</span>
+                  <span>Host</span>
+                  <span>Value</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-sm items-start">
+                  <span className="text-gray-900 dark:text-white">TXT</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">_dmarc</span>
+                  <div className="flex items-start gap-1">
+                    <span className="text-gray-600 dark:text-gray-300 font-mono text-xs break-all">
+                      v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email; ruf=mailto:dmarc@nubo.email; fo=1; pct=100
+                    </span>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email; ruf=mailto:dmarc@nubo.email; fo=1; pct=100'
+                        )
+                      }
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
                     >
                       <Copy className="h-3 w-3" />
                     </button>
@@ -452,10 +515,16 @@ export default function WorkspaceDomainsPage() {
               </div>
             </div>
 
-            {/* DMARC Record */}
+            {/* Optional Records Section */}
+            <div className="border-b border-gray-200 dark:border-gray-700 pb-2 mt-6">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Optional Records (Recommended)</h3>
+            </div>
+
+            {/* Autodiscover */}
             <div>
-              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                DMARC Record
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                Autodiscover (CNAME)
+                <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-2 py-0.5 rounded">Optional</span>
               </h4>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                 <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -463,29 +532,75 @@ export default function WorkspaceDomainsPage() {
                   <span>Host</span>
                   <span>Value</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-sm">
-                  <span className="text-gray-900 dark:text-white">TXT</span>
-                  <span className="text-gray-600 dark:text-gray-300">_dmarc</span>
+                <div className="grid grid-cols-3 gap-2 text-sm items-center">
+                  <span className="text-gray-900 dark:text-white">CNAME</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">autodiscover</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-600 dark:text-gray-300 truncate">
-                      v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email
+                    <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">
+                      autodiscover.nubo.email
                     </span>
                     <button
-                      onClick={() =>
-                        copyToClipboard(
-                          'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email'
-                        )
-                      }
-                      className="text-gray-400 hover:text-gray-600"
+                      onClick={() => copyToClipboard('autodiscover.nubo.email')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
                     >
                       <Copy className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Enables automatic email client configuration for Outlook/Exchange
+                </p>
+              </div>
+            </div>
+
+            {/* Autoconfig */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                Autoconfig (CNAME)
+                <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-2 py-0.5 rounded">Optional</span>
+              </h4>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  <span>Type</span>
+                  <span>Host</span>
+                  <span>Value</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-sm items-center">
+                  <span className="text-gray-900 dark:text-white">CNAME</span>
+                  <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">autoconfig</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-600 dark:text-gray-300 font-mono text-xs">
+                      autoconfig.nubo.email
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard('autoconfig.nubo.email')}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Enables automatic email client configuration for Thunderbird and other clients
+                </p>
+              </div>
+            </div>
+
+            {/* Custom Mail Server Option */}
+            <div className="border-b border-gray-200 dark:border-gray-700 pb-2 mt-6">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Alternative: Custom Mail Server</h3>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4">
+              <p className="text-sm text-amber-800 dark:text-amber-200 mb-3">
+                If you want to use your own mail server instead of Nubo's servers, configure these records:
+              </p>
+              <div className="space-y-2 text-xs font-mono text-amber-700 dark:text-amber-300">
+                <p>MX: @ → mail.{selectedDomain?.domainName || 'yourdomain.com'} (Priority: 10)</p>
+                <p>A: mail → YOUR_SERVER_IP (e.g., 46.224.135.53)</p>
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setDnsDialogOpen(false)}>
               Close
             </Button>

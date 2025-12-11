@@ -1299,6 +1299,17 @@ export const organizationDomain = createTable(
     dkimRecord: text('dkim_record'),
     dkimSelector: text('dkim_selector'),
     dmarcRecord: text('dmarc_record'),
+    // Mailcow configuration
+    domainQuotaBytes: bigint('domain_quota_bytes', { mode: 'number' }).default(0), // Total storage for domain
+    domainUsedBytes: bigint('domain_used_bytes', { mode: 'number' }).default(0), // Used storage
+    maxQuotaPerMailboxMB: integer('max_quota_per_mailbox_mb').default(10240), // Max quota per mailbox in MB (10GB default)
+    defaultQuotaPerMailboxMB: integer('default_quota_per_mailbox_mb').default(1024), // Default quota per mailbox in MB (1GB default)
+    maxMailboxes: integer('max_mailboxes').default(0), // 0 = unlimited
+    rateLimitPerHour: integer('rate_limit_per_hour').default(500), // Emails per hour
+    relayDomain: boolean('relay_domain').default(true), // Relay this domain
+    relayAllRecipients: boolean('relay_all_recipients').default(true), // Relay all recipients
+    mailcowActive: boolean('mailcow_active').default(true), // Active in Mailcow
+    mailcowDomainCreated: boolean('mailcow_domain_created').default(false), // Domain created in Mailcow
     // Archival configuration
     archivalEnabled: boolean('archival_enabled').default(false),
     archivalStorageBytes: bigint('archival_storage_bytes', { mode: 'number' }).default(0),

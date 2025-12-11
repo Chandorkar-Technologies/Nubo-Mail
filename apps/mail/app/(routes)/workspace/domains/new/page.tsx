@@ -15,9 +15,17 @@ export default function NewDomainPage() {
   const [loading, setLoading] = useState(false);
   const [domainName, setDomainName] = useState('');
   const [isPrimary, setIsPrimary] = useState(false);
+  // Mailcow settings
+  const [domainQuotaGB, setDomainQuotaGB] = useState(10);
+  const [maxQuotaPerMailboxMB, setMaxQuotaPerMailboxMB] = useState(10240);
+  const [defaultQuotaPerMailboxMB, setDefaultQuotaPerMailboxMB] = useState(1024);
+  const [maxMailboxes, setMaxMailboxes] = useState(0); // 0 = unlimited
+  const [rateLimitPerHour, setRateLimitPerHour] = useState(500);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [createdDomain, setCreatedDomain] = useState<{
     domainId: string;
     domainName: string;
+    mailcowCreated: boolean;
     dnsRecords: {
       mxRecord: string;
       spfRecord: string;
@@ -48,12 +56,20 @@ export default function NewDomainPage() {
       const result = await api.workspace.createDomain.mutate({
         domainName: domainName.toLowerCase(),
         isPrimary,
+        domainQuotaGB,
+        maxQuotaPerMailboxMB,
+        defaultQuotaPerMailboxMB,
+        maxMailboxes,
+        rateLimitPerHour,
+        relayDomain: true,
+        relayAllRecipients: true,
       });
 
       toast.success('Domain added successfully');
       setCreatedDomain({
         domainId: result.domainId,
         domainName: domainName.toLowerCase(),
+        mailcowCreated: result.mailcowCreated,
         dnsRecords: result.dnsRecords,
       });
     } catch (error: any) {
@@ -338,6 +354,102 @@ export default function NewDomainPage() {
               Set as primary domain
             </Label>
           </div>
+
+          {/* Domain Storage Quota */}
+          <div>
+            <Label htmlFor="domainQuotaGB">Domain Storage Quota (GB)</Label>
+            <Input
+              id="domainQuotaGB"
+              type="number"
+              min={1}
+              value={domainQuotaGB}
+              onChange={(e) => setDomainQuotaGB(parseInt(e.target.value) || 10)}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Total storage allocated to this domain for all mailboxes
+            </p>
+          </div>
+
+          {/* Default Mailbox Quota */}
+          <div>
+            <Label htmlFor="defaultQuotaPerMailboxMB">Default Mailbox Quota (MB)</Label>
+            <Input
+              id="defaultQuotaPerMailboxMB"
+              type="number"
+              min={100}
+              value={defaultQuotaPerMailboxMB}
+              onChange={(e) => setDefaultQuotaPerMailboxMB(parseInt(e.target.value) || 1024)}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Default storage quota for new mailboxes (1024 MB = 1 GB)
+            </p>
+          </div>
+
+          {/* Advanced Settings Toggle */}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="showAdvanced"
+              checked={showAdvanced}
+              onCheckedChange={(checked) => setShowAdvanced(checked as boolean)}
+            />
+            <Label htmlFor="showAdvanced" className="cursor-pointer">
+              Show advanced settings
+            </Label>
+          </div>
+
+          {showAdvanced && (
+            <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+              {/* Max Mailbox Quota */}
+              <div>
+                <Label htmlFor="maxQuotaPerMailboxMB">Max Quota per Mailbox (MB)</Label>
+                <Input
+                  id="maxQuotaPerMailboxMB"
+                  type="number"
+                  min={100}
+                  value={maxQuotaPerMailboxMB}
+                  onChange={(e) => setMaxQuotaPerMailboxMB(parseInt(e.target.value) || 10240)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Maximum storage any single mailbox can use
+                </p>
+              </div>
+
+              {/* Max Mailboxes */}
+              <div>
+                <Label htmlFor="maxMailboxes">Max Mailboxes</Label>
+                <Input
+                  id="maxMailboxes"
+                  type="number"
+                  min={0}
+                  value={maxMailboxes}
+                  onChange={(e) => setMaxMailboxes(parseInt(e.target.value) || 0)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Maximum number of mailboxes (0 = unlimited)
+                </p>
+              </div>
+
+              {/* Rate Limit */}
+              <div>
+                <Label htmlFor="rateLimitPerHour">Rate Limit (emails/hour)</Label>
+                <Input
+                  id="rateLimitPerHour"
+                  type="number"
+                  min={0}
+                  value={rateLimitPerHour}
+                  onChange={(e) => setRateLimitPerHour(parseInt(e.target.value) || 500)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Maximum emails per hour per mailbox (0 = unlimited)
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Submit */}
           <div className="flex gap-3 pt-4">

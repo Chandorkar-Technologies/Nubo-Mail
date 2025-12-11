@@ -328,6 +328,30 @@ export default function OrganizationDetailPage() {
     }
   };
 
+  const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
+
+  const handleVerifyDomainDns = async (domainId: string) => {
+    setVerifyingDomain(domainId);
+    try {
+      const result = await api.partner.verifyDomainDns.mutate({ domainId });
+      if (result.verified) {
+        toast.success('Domain DNS verified successfully! Domain is now active.');
+      } else {
+        const failedRecords = [];
+        if (!result.results.mx.verified) failedRecords.push('MX');
+        if (!result.results.spf.verified) failedRecords.push('SPF');
+        if (!result.results.dkim.verified) failedRecords.push('DKIM');
+        if (!result.results.dmarc.verified) failedRecords.push('DMARC');
+        toast.error(`DNS verification incomplete. Missing: ${failedRecords.join(', ')}`);
+      }
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to verify DNS records');
+    } finally {
+      setVerifyingDomain(null);
+    }
+  };
+
   // =============== User Actions ===============
 
   const handleAddUser = async () => {
@@ -653,45 +677,65 @@ export default function OrganizationDetailPage() {
                         </p>
                       </div>
 
-                      {/* MX Record */}
+                      {/* Required Records Header */}
+                      <div className="border-b border-gray-200 dark:border-gray-700 pb-2">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Required Records</h4>
+                      </div>
+
+                      {/* MX Records */}
                       <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">MX Record</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(domain.mxRecord || 'mail.nubo.email')}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            MX Records
+                            <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
+                          </span>
                         </div>
-                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border">
-                          {domain.mxRecord || 'mail.nubo.email (Priority: 10)'}
-                        </code>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border">
+                            <code className="text-sm text-gray-900 dark:text-white">
+                              @ MX mx1.nubo.email (Priority: 10)
+                            </code>
+                            <Button variant="ghost" size="sm" onClick={() => copyToClipboard('mx1.nubo.email')}>
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border">
+                            <code className="text-sm text-gray-900 dark:text-white">
+                              @ MX mx2.nubo.email (Priority: 20)
+                            </code>
+                            <Button variant="ghost" size="sm" onClick={() => copyToClipboard('mx2.nubo.email')}>
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
 
                       {/* SPF Record */}
                       <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SPF Record (TXT)</span>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            SPF Record (TXT)
+                            <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
+                          </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => copyToClipboard(domain.spfRecord || 'v=spf1 include:nubo.email ~all')}
+                            onClick={() => copyToClipboard('v=spf1 a mx ip4:46.224.135.53 ip6:2a01:4f8:c013:fd93::1 include:mailchannels.net -all')}
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
                         </div>
                         <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
-                          {domain.spfRecord || 'v=spf1 include:nubo.email ~all'}
+                          v=spf1 a mx ip4:46.224.135.53 ip6:2a01:4f8:c013:fd93::1 include:mailchannels.net -all
                         </code>
                       </div>
 
                       {/* DKIM Record */}
                       <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            DKIM Record (TXT) - {domain.dkimSelector || 'nubo'}._domainkey
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            DKIM Record (TXT) - dkim._domainkey
+                            <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
                           </span>
                           <Button
                             variant="ghost"
@@ -702,33 +746,105 @@ export default function OrganizationDetailPage() {
                           </Button>
                         </div>
                         <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
-                          {domain.dkimRecord || 'Contact admin for DKIM key'}
+                          {domain.dkimRecord || 'DKIM key will be generated after domain verification'}
                         </code>
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                          Note: DKIM key is generated after domain verification. Contact support if you need the key.
+                        </p>
                       </div>
 
                       {/* DMARC Record */}
                       <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">DMARC Record (TXT) - _dmarc</span>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            DMARC Record (TXT) - _dmarc
+                            <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 rounded">Required</span>
+                          </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => copyToClipboard(domain.dmarcRecord || 'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email')}
+                            onClick={() => copyToClipboard('v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email; ruf=mailto:dmarc@nubo.email; fo=1; pct=100')}
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
                         </div>
                         <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border break-all">
-                          {domain.dmarcRecord || 'v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email'}
+                          v=DMARC1; p=quarantine; rua=mailto:dmarc@nubo.email; ruf=mailto:dmarc@nubo.email; fo=1; pct=100
                         </code>
+                      </div>
+
+                      {/* Optional Records Header */}
+                      <div className="border-b border-gray-200 dark:border-gray-700 pb-2 mt-4">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Optional Records (Recommended)</h4>
+                      </div>
+
+                      {/* Autodiscover */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            Autodiscover (CNAME)
+                            <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-2 py-0.5 rounded">Optional</span>
+                          </span>
+                          <Button variant="ghost" size="sm" onClick={() => copyToClipboard('autodiscover.nubo.email')}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border">
+                          autodiscover CNAME autodiscover.nubo.email
+                        </code>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Enables automatic configuration for Outlook/Exchange
+                        </p>
+                      </div>
+
+                      {/* Autoconfig */}
+                      <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            Autoconfig (CNAME)
+                            <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-2 py-0.5 rounded">Optional</span>
+                          </span>
+                          <Button variant="ghost" size="sm" onClick={() => copyToClipboard('autoconfig.nubo.email')}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <code className="text-sm text-gray-900 dark:text-white block p-2 bg-white dark:bg-gray-800 rounded border">
+                          autoconfig CNAME autoconfig.nubo.email
+                        </code>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Enables automatic configuration for Thunderbird and other clients
+                        </p>
+                      </div>
+
+                      {/* Custom Mail Server Option */}
+                      <div className="border-b border-gray-200 dark:border-gray-700 pb-2 mt-4">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Alternative: Custom Mail Server</h4>
+                      </div>
+                      <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                        <p className="text-sm text-amber-800 dark:text-amber-200 mb-2">
+                          If you want to use your own mail server instead:
+                        </p>
+                        <div className="space-y-1 text-xs font-mono text-amber-700 dark:text-amber-300">
+                          <p>@ MX mail.{domain.domainName} (Priority: 10)</p>
+                          <p>mail A YOUR_SERVER_IP</p>
+                        </div>
                       </div>
 
                       {!domain.dnsVerified && (
                         <div className="flex items-start gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
                           <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
-                          <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                            DNS records are pending verification. Once you've added these records, our admin will verify and activate your domain.
-                          </p>
+                          <div className="flex-1">
+                            <p className="text-sm text-yellow-700 dark:text-yellow-300 mb-3">
+                              DNS records are pending verification. Once you've added these records, click the button below to verify.
+                            </p>
+                            <Button
+                              onClick={() => handleVerifyDomainDns(domain.id)}
+                              disabled={verifyingDomain === domain.id}
+                              size="sm"
+                            >
+                              {verifyingDomain === domain.id ? 'Verifying...' : 'Verify DNS Records'}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
