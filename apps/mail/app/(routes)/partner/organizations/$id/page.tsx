@@ -113,6 +113,13 @@ export default function OrganizationDetailPage() {
   const [addDomainDialogOpen, setAddDomainDialogOpen] = useState(false);
   const [newDomainName, setNewDomainName] = useState('');
   const [addingDomain, setAddingDomain] = useState(false);
+  // Mailcow domain settings
+  const [domainQuotaGB, setDomainQuotaGB] = useState(10);
+  const [maxQuotaPerMailboxMB, setMaxQuotaPerMailboxMB] = useState(10240);
+  const [defaultQuotaPerMailboxMB, setDefaultQuotaPerMailboxMB] = useState(1024);
+  const [maxMailboxes, setMaxMailboxes] = useState(0); // 0 = unlimited
+  const [rateLimitPerHour, setRateLimitPerHour] = useState(500);
+  const [showAdvancedDomain, setShowAdvancedDomain] = useState(false);
 
   // Domain detail expansion
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
@@ -126,6 +133,8 @@ export default function OrganizationDetailPage() {
   const [addUserDialogOpen, setAddUserDialogOpen] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserDisplayName, setNewUserDisplayName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserConfirmPassword, setNewUserConfirmPassword] = useState('');
   const [newUserDomainId, setNewUserDomainId] = useState('');
   const [newUserMailboxStorage, setNewUserMailboxStorage] = useState(5); // GB
   const [newUserDriveStorage, setNewUserDriveStorage] = useState(5); // GB
@@ -295,15 +304,35 @@ export default function OrganizationDetailPage() {
 
   const handleAddDomain = async () => {
     if (!id || !newDomainName.trim()) return;
+
+    // Check if organization has enough storage for domain quota
+    const domainQuotaBytes = domainQuotaGB * 1024 * 1024 * 1024;
+    if (organization && domainQuotaBytes > organization.totalStorageBytes - organization.usedStorageBytes) {
+      toast.error('Insufficient storage in organization for this domain quota');
+      return;
+    }
+
     setAddingDomain(true);
     try {
       await api.partner.createDomain.mutate({
         organizationId: id,
         domainName: newDomainName.trim().toLowerCase(),
+        domainQuotaGB,
+        maxQuotaPerMailboxMB,
+        defaultQuotaPerMailboxMB,
+        maxMailboxes,
+        rateLimitPerHour,
       });
       toast.success('Domain added successfully');
       setAddDomainDialogOpen(false);
+      // Reset form
       setNewDomainName('');
+      setDomainQuotaGB(10);
+      setMaxQuotaPerMailboxMB(10240);
+      setDefaultQuotaPerMailboxMB(1024);
+      setMaxMailboxes(0);
+      setRateLimitPerHour(500);
+      setShowAdvancedDomain(false);
       fetchData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to add domain');
@@ -357,9 +386,26 @@ export default function OrganizationDetailPage() {
   const handleAddUser = async () => {
     if (!id || !newUserEmail.trim() || !newUserDomainId) return;
 
+    // Validate password
+    if (!newUserPassword || newUserPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+
+    if (newUserPassword !== newUserConfirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
     const selectedDomain = domains.find((d) => d.id === newUserDomainId);
     if (!selectedDomain) {
       toast.error('Please select a domain');
+      return;
+    }
+
+    // Check domain is active
+    if (selectedDomain.status !== 'active') {
+      toast.error('Selected domain is not active. Please verify DNS first.');
       return;
     }
 
@@ -380,13 +426,17 @@ export default function OrganizationDetailPage() {
         domainId: newUserDomainId,
         emailAddress: fullEmail,
         displayName: newUserDisplayName.trim() || undefined,
+        password: newUserPassword,
         mailboxStorageBytes: gbToBytes(newUserMailboxStorage),
         driveStorageBytes: gbToBytes(newUserDriveStorage),
       });
-      toast.success('User added successfully');
+      toast.success('User created successfully! They can now login with their email and password.');
       setAddUserDialogOpen(false);
+      // Reset form
       setNewUserEmail('');
       setNewUserDisplayName('');
+      setNewUserPassword('');
+      setNewUserConfirmPassword('');
       setNewUserDomainId('');
       setNewUserMailboxStorage(5);
       setNewUserDriveStorage(5);
@@ -1023,7 +1073,7 @@ export default function OrganizationDetailPage() {
 
       {/* Add Domain Dialog */}
       <Dialog open={addDomainDialogOpen} onOpenChange={setAddDomainDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Domain</DialogTitle>
             <DialogDescription>
@@ -1040,6 +1090,83 @@ export default function OrganizationDetailPage() {
                 onChange={(e) => setNewDomainName(e.target.value)}
               />
             </div>
+
+            <div>
+              <Label htmlFor="domainQuota">Domain Storage Quota (GB)</Label>
+              <Input
+                id="domainQuota"
+                type="number"
+                min={1}
+                value={domainQuotaGB}
+                onChange={(e) => setDomainQuotaGB(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Available: {organization ? formatBytes(organization.totalStorageBytes - organization.usedStorageBytes) : '0'}
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="defaultQuota">Default Mailbox Quota (MB)</Label>
+              <Input
+                id="defaultQuota"
+                type="number"
+                min={100}
+                value={defaultQuotaPerMailboxMB}
+                onChange={(e) => setDefaultQuotaPerMailboxMB(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">Default storage for new mailboxes</p>
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-gray-500"
+              onClick={() => setShowAdvancedDomain(!showAdvancedDomain)}
+            >
+              {showAdvancedDomain ? <ChevronUp className="h-4 w-4 mr-2" /> : <ChevronDown className="h-4 w-4 mr-2" />}
+              Advanced Settings
+            </Button>
+
+            {showAdvancedDomain && (
+              <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <div>
+                  <Label htmlFor="maxQuota">Max Quota Per Mailbox (MB)</Label>
+                  <Input
+                    id="maxQuota"
+                    type="number"
+                    min={100}
+                    value={maxQuotaPerMailboxMB}
+                    onChange={(e) => setMaxQuotaPerMailboxMB(Number(e.target.value))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Maximum storage any mailbox can have</p>
+                </div>
+
+                <div>
+                  <Label htmlFor="maxMailboxes">Max Mailboxes</Label>
+                  <Input
+                    id="maxMailboxes"
+                    type="number"
+                    min={0}
+                    value={maxMailboxes}
+                    onChange={(e) => setMaxMailboxes(Number(e.target.value))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">0 = unlimited mailboxes</p>
+                </div>
+
+                <div>
+                  <Label htmlFor="rateLimit">Rate Limit (emails/hour)</Label>
+                  <Input
+                    id="rateLimit"
+                    type="number"
+                    min={0}
+                    value={rateLimitPerHour}
+                    onChange={(e) => setRateLimitPerHour(Number(e.target.value))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Max emails per hour (0 = unlimited)</p>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDomainDialogOpen(false)}>
@@ -1077,10 +1204,12 @@ export default function OrganizationDetailPage() {
 
       {/* Add User Dialog */}
       <Dialog open={addUserDialogOpen} onOpenChange={setAddUserDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Email Account</DialogTitle>
-            <DialogDescription>Create a new email account for this organization.</DialogDescription>
+            <DialogDescription>
+              Create a new email account for this organization. The user will be able to login with their email and password.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -1090,16 +1219,22 @@ export default function OrganizationDetailPage() {
                   <SelectValue placeholder="Select a domain" />
                 </SelectTrigger>
                 <SelectContent>
-                  {domains.map((domain) => (
+                  {domains.filter(d => d.status === 'active').map((domain) => (
                     <SelectItem key={domain.id} value={domain.id}>
                       {domain.domainName}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {domains.length > 0 && domains.filter(d => d.status === 'active').length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  No active domains. Please verify DNS for at least one domain first.
+                </p>
+              )}
             </div>
+
             <div>
-              <Label htmlFor="userEmail">Email (local part)</Label>
+              <Label htmlFor="userEmail">Username (local part)</Label>
               <div className="flex items-center gap-2">
                 <Input
                   id="userEmail"
@@ -1107,13 +1242,14 @@ export default function OrganizationDetailPage() {
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                 />
-                <span className="text-gray-500 dark:text-gray-400">
+                <span className="text-gray-500 dark:text-gray-400 whitespace-nowrap">
                   @{domains.find((d) => d.id === newUserDomainId)?.domainName || 'domain.com'}
                 </span>
               </div>
             </div>
+
             <div>
-              <Label htmlFor="displayName">Display Name (optional)</Label>
+              <Label htmlFor="displayName">Full Name</Label>
               <Input
                 id="displayName"
                 placeholder="John Doe"
@@ -1121,34 +1257,74 @@ export default function OrganizationDetailPage() {
                 onChange={(e) => setNewUserDisplayName(e.target.value)}
               />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="mailboxStorage">Mailbox Storage (GB)</Label>
+                <Label htmlFor="userPassword">Password</Label>
                 <Input
-                  id="mailboxStorage"
-                  type="number"
-                  min={1}
-                  value={newUserMailboxStorage}
-                  onChange={(e) => setNewUserMailboxStorage(Number(e.target.value))}
+                  id="userPassword"
+                  type="password"
+                  placeholder="Min 8 characters"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
                 />
               </div>
               <div>
-                <Label htmlFor="driveStorage">Drive Storage (GB)</Label>
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
                 <Input
-                  id="driveStorage"
-                  type="number"
-                  min={0}
-                  value={newUserDriveStorage}
-                  onChange={(e) => setNewUserDriveStorage(Number(e.target.value))}
+                  id="confirmPassword"
+                  type="password"
+                  placeholder="Retype password"
+                  value={newUserConfirmPassword}
+                  onChange={(e) => setNewUserConfirmPassword(e.target.value)}
                 />
               </div>
             </div>
+            {newUserPassword && newUserConfirmPassword && newUserPassword !== newUserConfirmPassword && (
+              <p className="text-xs text-red-500">Passwords do not match</p>
+            )}
+
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-medium mb-3">Storage Allocation</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="mailboxStorage">Mailbox Storage (GB)</Label>
+                  <Input
+                    id="mailboxStorage"
+                    type="number"
+                    min={1}
+                    value={newUserMailboxStorage}
+                    onChange={(e) => setNewUserMailboxStorage(Number(e.target.value))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Email storage</p>
+                </div>
+                <div>
+                  <Label htmlFor="driveStorage">Drive Storage (GB)</Label>
+                  <Input
+                    id="driveStorage"
+                    type="number"
+                    min={0}
+                    value={newUserDriveStorage}
+                    onChange={(e) => setNewUserDriveStorage(Number(e.target.value))}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Nubo Drive storage</p>
+                </div>
+              </div>
+            </div>
+
             <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Total: {newUserMailboxStorage + newUserDriveStorage} GB per user
+                Total allocation: {newUserMailboxStorage + newUserDriveStorage} GB
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                 Available in organization: {formatBytes(organization.totalStorageBytes - organization.usedStorageBytes)}
+              </p>
+            </div>
+
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                <strong>After creation:</strong> User can login at nubo.email with their email and password.
+                Their emails will sync automatically.
               </p>
             </div>
           </div>
@@ -1158,9 +1334,16 @@ export default function OrganizationDetailPage() {
             </Button>
             <Button
               onClick={handleAddUser}
-              disabled={addingUser || !newUserEmail.trim() || !newUserDomainId}
+              disabled={
+                addingUser ||
+                !newUserEmail.trim() ||
+                !newUserDomainId ||
+                !newUserPassword ||
+                newUserPassword.length < 8 ||
+                newUserPassword !== newUserConfirmPassword
+              }
             >
-              {addingUser ? 'Adding...' : 'Add User'}
+              {addingUser ? 'Creating...' : 'Create User'}
             </Button>
           </DialogFooter>
         </DialogContent>
