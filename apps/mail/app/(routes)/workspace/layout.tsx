@@ -199,7 +199,7 @@ export default function WorkspaceLayout({ loaderData }: Route.ComponentProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 min-w-0 overflow-auto">
         <Outlet />
       </main>
     </div>

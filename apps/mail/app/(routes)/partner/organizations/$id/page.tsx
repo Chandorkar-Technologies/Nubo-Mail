@@ -1345,16 +1345,21 @@ export default function OrganizationDetailPage() {
                   <SelectValue placeholder="Select a domain" />
                 </SelectTrigger>
                 <SelectContent>
-                  {domains.filter(d => d.status === 'active').map((domain) => (
+                  {domains.map((domain) => (
                     <SelectItem key={domain.id} value={domain.id}>
                       {domain.domainName}
+                      {domain.status !== 'active' && (
+                        <span className="ml-2 text-xs text-amber-500">
+                          ({domain.status === 'dns_pending' ? 'DNS pending' : domain.status})
+                        </span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {domains.length > 0 && domains.filter(d => d.status === 'active').length === 0 && (
+              {domains.length === 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  No active domains. Please verify DNS for at least one domain first.
+                  No domains configured. Please add a domain first.
                 </p>
               )}
             </div>
