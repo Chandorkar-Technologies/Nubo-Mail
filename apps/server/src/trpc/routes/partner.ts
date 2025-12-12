@@ -29,6 +29,7 @@ import {
   invoiceLineItem,
   user,
   account,
+  connection,
 } from '../../db/schema';
 import { mailcowApi } from '../../lib/mailcow';
 import { verifyDomainDns } from '../../lib/dns-verify';
@@ -1424,6 +1425,37 @@ export const partnerRouter = router({
         updatedAt: new Date(),
       });
 
+      // 6. Create connection record for email access
+      const connectionId = crypto.randomUUID();
+      await db.insert(connection).values({
+        id: connectionId,
+        userId: mainUserId,
+        email: emailLower,
+        name: input.displayName || localPart,
+        providerId: 'imap',
+        scope: 'mail',
+        config: {
+          imap: {
+            host: mailConfig.imap.host,
+            port: mailConfig.imap.port,
+            secure: true,
+          },
+          smtp: {
+            host: mailConfig.smtp.host,
+            port: mailConfig.smtp.port,
+            secure: true,
+          },
+          auth: {
+            user: emailLower,
+            pass: input.password,
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        expiresAt: null,
+      });
+      console.log('[Partner] Created connection for user:', emailLower, 'connectionId:', connectionId);
+
       // Update organization's used storage
       if (totalUserStorage > 0) {
         await db
@@ -1439,6 +1471,7 @@ export const partnerRouter = router({
         success: true,
         userId: orgUserId,
         mainUserId,
+        connectionId,
         emailAddress: emailLower,
         imapConfig: {
           host: mailConfig.imap.host,
