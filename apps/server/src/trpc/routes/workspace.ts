@@ -31,7 +31,7 @@ import { mailcowApi } from '../../lib/mailcow';
 import { verifyDomainDns } from '../../lib/dns-verify';
 import { hashPassword } from '../../lib/auth-utils';
 
-// Workspace middleware - checks if user is an organization owner/admin
+// Workspace middleware - checks if user is an organization owner or admin
 const workspaceMiddleware = privateProcedure.use(async ({ ctx, next }) => {
   const { sessionUser, db } = ctx;
 
@@ -43,19 +43,23 @@ const workspaceMiddleware = privateProcedure.use(async ({ ctx, next }) => {
     .limit(1);
 
   if (!org.length) {
-    // Check if user is an organization user (employee)
+    // Check if user is an organization user (employee) with admin role
     const orgUser = await db
       .select()
       .from(organizationUser)
       .where(
-        and(eq(organizationUser.userId, sessionUser.id), eq(organizationUser.status, 'active'))
+        and(
+          eq(organizationUser.userId, sessionUser.id),
+          eq(organizationUser.status, 'active'),
+          eq(organizationUser.role, 'admin') // Only admins can access workspace
+        )
       )
       .limit(1);
 
     if (!orgUser.length) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Workspace access required',
+        message: 'Workspace access requires admin privileges. Contact your organization administrator.',
       });
     }
 
@@ -79,6 +83,7 @@ const workspaceMiddleware = privateProcedure.use(async ({ ctx, next }) => {
         organization: userOrg[0],
         organizationUser: orgUser[0],
         isOwner: false,
+        isAdmin: true,
       },
     });
   }
@@ -89,6 +94,7 @@ const workspaceMiddleware = privateProcedure.use(async ({ ctx, next }) => {
       organization: org[0],
       organizationUser: null,
       isOwner: true,
+      isAdmin: true, // Owner is always admin
     },
   });
 });
@@ -934,7 +940,7 @@ export const workspaceRouter = router({
         id: u.id,
         emailAddress: u.emailAddress,
         displayName: u.displayName || u.emailAddress.split('@')[0],
-        role: 'member', // Default role - organization owners are handled differently
+        role: u.role || 'member', // Use actual role from database
         status: u.status || 'pending',
         storageUsedBytes: Number(u.mailboxUsedBytes || 0) + Number(u.driveUsedBytes || 0),
         hasProSubscription: u.hasProSubscription || false,
@@ -1067,6 +1073,14 @@ export const workspaceRouter = router({
       const localPart = input.emailAddress.split('@')[0];
       const emailLower = input.emailAddress.toLowerCase();
 
+      // Check if this is the first user of the organization - first user becomes admin
+      const existingUserCount = await db
+        .select({ count: count() })
+        .from(organizationUser)
+        .where(eq(organizationUser.organizationId, org.id));
+      const isFirstUser = (existingUserCount[0]?.count ?? 0) === 0;
+      const userRole = isFirstUser ? 'admin' : 'member';
+
       // 1. Create mailbox in Mailcow
       try {
         const mailcowResult = await mailcowApi.createMailbox({
@@ -1136,11 +1150,13 @@ export const workspaceRouter = router({
         smtpUsername: emailLower,
         smtpPasswordEncrypted: input.password, // TODO: Encrypt this
         status: 'active', // Active immediately since mailbox is created
+        role: userRole, // First user becomes admin, others are members
         provisionedBy: ctx.sessionUser.id,
         provisionedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      console.log(`[Workspace] Created user ${emailLower} with role: ${userRole} (isFirstUser: ${isFirstUser})`);
 
       // 6. Create connection record for email access
       const connectionId = crypto.randomUUID();
@@ -2088,6 +2104,74 @@ export const workspaceRouter = router({
           updatedAt: new Date(),
         })
         .where(eq(organizationUser.id, input.userId));
+
+      return { success: true };
+    }),
+
+  // ======================= Role Management =======================
+
+  updateUserRole: workspaceMiddleware
+    .input(
+      z.object({
+        userId: z.string(),
+        role: z.enum(['admin', 'member']),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { db, organization: org, isOwner } = ctx;
+
+      if (!isOwner) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only organization owner can change user roles',
+        });
+      }
+
+      // Get user details
+      const orgUser = await db
+        .select()
+        .from(organizationUser)
+        .where(
+          and(
+            eq(organizationUser.id, input.userId),
+            eq(organizationUser.organizationId, org.id)
+          )
+        )
+        .limit(1);
+
+      if (!orgUser.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      // Prevent demoting the last admin
+      if (input.role === 'member' && orgUser[0].role === 'admin') {
+        const adminCount = await db
+          .select({ count: count() })
+          .from(organizationUser)
+          .where(
+            and(
+              eq(organizationUser.organizationId, org.id),
+              eq(organizationUser.role, 'admin')
+            )
+          );
+
+        if ((adminCount[0]?.count ?? 0) <= 1) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Cannot demote the last admin. Promote another user to admin first.',
+          });
+        }
+      }
+
+      await db
+        .update(organizationUser)
+        .set({
+          role: input.role,
+          updatedAt: new Date(),
+        })
+        .where(eq(organizationUser.id, input.userId));
+
+      console.log(`[Workspace] Updated user ${orgUser[0].emailAddress} role to: ${input.role}`);
 
       return { success: true };
     }),

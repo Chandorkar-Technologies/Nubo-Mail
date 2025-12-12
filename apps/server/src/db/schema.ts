@@ -1366,8 +1366,9 @@ export const organizationUser = createTable(
     hasProSubscription: boolean('has_pro_subscription').default(false),
     proSubscriptionType: text('pro_subscription_type').$type<'monthly' | 'yearly'>(),
     proSubscriptionExpiresAt: timestamp('pro_subscription_expires_at'),
-    // Status
+    // Status and Role
     status: text('status').$type<'pending' | 'active' | 'suspended'>().default('pending'),
+    role: text('role').$type<'admin' | 'member'>().default('member'),
     provisionedBy: text('provisioned_by').references(() => user.id, { onDelete: 'set null' }),
     provisionedAt: timestamp('provisioned_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -1380,6 +1381,7 @@ export const organizationUser = createTable(
     index('organization_user_email_idx').on(t.emailAddress),
     index('organization_user_nubo_username_idx').on(t.nuboUsername),
     index('organization_user_status_idx').on(t.status),
+    index('organization_user_role_idx').on(t.role),
     index('organization_user_has_pro_idx').on(t.hasProSubscription),
   ],
 );

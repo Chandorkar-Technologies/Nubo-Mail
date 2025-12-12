@@ -1344,6 +1344,14 @@ export const partnerRouter = router({
       const localPart = input.emailAddress.split('@')[0];
       const emailLower = input.emailAddress.toLowerCase();
 
+      // Check if this is the first user of the organization - first user becomes admin
+      const existingUserCount = await db
+        .select({ count: count() })
+        .from(organizationUser)
+        .where(eq(organizationUser.organizationId, input.organizationId));
+      const isFirstUser = (existingUserCount[0]?.count ?? 0) === 0;
+      const userRole = isFirstUser ? 'admin' : 'member';
+
       // 1. Create mailbox in Mailcow
       try {
         console.log('[Mailcow] Creating mailbox:', emailLower);
@@ -1420,11 +1428,13 @@ export const partnerRouter = router({
         smtpUsername: emailLower,
         smtpPasswordEncrypted: input.password,
         status: 'active',
+        role: userRole, // First user becomes admin, others are members
         provisionedBy: ctx.sessionUser.id,
         provisionedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      console.log(`[Partner] Created user ${emailLower} with role: ${userRole} (isFirstUser: ${isFirstUser})`);
 
       // 6. Create connection record for email access
       const connectionId = crypto.randomUUID();
