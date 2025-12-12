@@ -106,10 +106,20 @@ class MailcowApiService {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
     body?: Record<string, unknown>
   ): Promise<T> {
-    const url = `${this.getBaseUrl()}/api/v1${endpoint}`;
+    const baseUrl = this.getBaseUrl();
+    const apiKey = this.getApiKey();
+    const url = `${baseUrl}/api/v1${endpoint}`;
+
+    console.log(`[Mailcow API] ${method} ${endpoint}`);
+    console.log(`[Mailcow API] Base URL: ${baseUrl}`);
+    console.log(`[Mailcow API] API Key configured: ${apiKey ? 'yes (' + apiKey.substring(0, 4) + '...)' : 'NO - MISSING!'}`);
+
+    if (!apiKey) {
+      throw new Error('Mailcow API key not configured. Please set MAILCOW_API_KEY secret.');
+    }
 
     const headers: Record<string, string> = {
-      'X-API-Key': this.getApiKey(),
+      'X-API-Key': apiKey,
       'Content-Type': 'application/json',
     };
 
@@ -120,16 +130,26 @@ class MailcowApiService {
 
     if (body && (method === 'POST' || method === 'PUT')) {
       options.body = JSON.stringify(body);
+      console.log(`[Mailcow API] Request body:`, JSON.stringify(body));
     }
 
     const response = await fetch(url, options);
+    const responseText = await response.text();
+
+    console.log(`[Mailcow API] Response status: ${response.status}`);
+    console.log(`[Mailcow API] Response body: ${responseText.substring(0, 500)}`);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Mailcow API error: ${response.status} - ${errorText}`);
+      throw new Error(`Mailcow API error: ${response.status} - ${responseText}`);
     }
 
-    return response.json() as Promise<T>;
+    // Parse JSON response
+    try {
+      return JSON.parse(responseText) as T;
+    } catch {
+      console.error(`[Mailcow API] Failed to parse JSON response: ${responseText}`);
+      throw new Error(`Mailcow API returned invalid JSON: ${responseText}`);
+    }
   }
 
   // ==================== Domain Operations ====================
@@ -483,9 +503,14 @@ class MailcowApiService {
    */
   async domainExists(domainName: string): Promise<boolean> {
     try {
-      await this.getDomain(domainName);
-      return true;
-    } catch {
+      console.log(`[Mailcow] Checking if domain exists: ${domainName}`);
+      const domain = await this.getDomain(domainName);
+      // Mailcow returns empty array or object with no domain_name if domain doesn't exist
+      const exists = domain && typeof domain === 'object' && 'domain_name' in domain && domain.domain_name === domainName;
+      console.log(`[Mailcow] Domain ${domainName} exists: ${exists}`, domain);
+      return exists;
+    } catch (error) {
+      console.log(`[Mailcow] Domain check error for ${domainName}:`, error);
       return false;
     }
   }
