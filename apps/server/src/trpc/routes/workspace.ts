@@ -25,6 +25,7 @@ import {
   emailArchival,
   user,
   account,
+  connection,
 } from '../../db/schema';
 import { mailcowApi } from '../../lib/mailcow';
 import { verifyDomainDns } from '../../lib/dns-verify';
@@ -280,8 +281,8 @@ export const workspaceRouter = router({
         defaultQuotaPerMailboxMB: z.number().min(100).default(1024), // Default quota per mailbox in MB
         maxMailboxes: z.number().min(0).default(0), // 0 = unlimited
         rateLimitPerHour: z.number().min(0).default(500), // Emails per hour
-        relayDomain: z.boolean().default(true),
-        relayAllRecipients: z.boolean().default(true),
+        relayDomain: z.boolean().default(false),
+        relayAllRecipients: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -338,7 +339,8 @@ export const workspaceRouter = router({
             maxquota: input.maxQuotaPerMailboxMB,
             quota: input.domainQuotaGB * 1024, // Convert GB to MB for Mailcow
             active: 1,
-            relay_all_recipients: input.relayAllRecipients ? 1 : 0,
+            relay_all_recipients: 0,
+            relay_unknown_only: 0,
           });
 
           if (mailcowResult.type === 'success') {
@@ -1018,14 +1020,6 @@ export const workspaceRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Domain not found' });
       }
 
-      // Check domain is active
-      if (domain[0].status !== 'active') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Domain is not active. Please verify DNS first.',
-        });
-      }
-
       // Verify email matches domain
       const emailDomain = input.emailAddress.split('@')[1];
       if (emailDomain?.toLowerCase() !== domain[0].domainName.toLowerCase()) {
@@ -1148,6 +1142,37 @@ export const workspaceRouter = router({
         updatedAt: new Date(),
       });
 
+      // 6. Create connection record for email access
+      const connectionId = crypto.randomUUID();
+      await db.insert(connection).values({
+        id: connectionId,
+        userId: mainUserId,
+        email: emailLower,
+        name: input.displayName || localPart,
+        providerId: 'imap',
+        scope: 'mail',
+        config: {
+          imap: {
+            host: mailConfig.imap.host,
+            port: mailConfig.imap.port,
+            secure: true,
+          },
+          smtp: {
+            host: mailConfig.smtp.host,
+            port: mailConfig.smtp.port,
+            secure: true,
+          },
+          auth: {
+            user: emailLower,
+            pass: input.password,
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        expiresAt: null,
+      });
+      console.log('[Workspace] Created connection for user:', emailLower, 'connectionId:', connectionId);
+
       // Update organization's used storage
       if (totalUserStorage > 0) {
         await db
@@ -1163,6 +1188,7 @@ export const workspaceRouter = router({
         success: true,
         userId: orgUserId,
         mainUserId,
+        connectionId,
         emailAddress: emailLower,
         imapConfig: {
           host: mailConfig.imap.host,

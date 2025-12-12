@@ -48,13 +48,11 @@ export default function NewUserPage() {
     const fetchDomains = async () => {
       try {
         const data = await api.workspace.getDomains.query({});
-        // Only show active domains
-        const activeDomains = (data?.domains || []).filter(
-          (d: Domain) => d.status === 'active'
-        );
-        setDomains(activeDomains);
-        if (activeDomains.length > 0) {
-          setFormData((prev) => ({ ...prev, domainId: activeDomains[0].id }));
+        // Show all domains (not just active ones)
+        const allDomains = data?.domains || [];
+        setDomains(allDomains);
+        if (allDomains.length > 0) {
+          setFormData((prev) => ({ ...prev, domainId: allDomains[0].id }));
         }
       } catch (error) {
         console.error('Failed to fetch domains:', error);
@@ -254,10 +252,20 @@ SMTP Settings:
                   {domains.map((domain) => (
                     <SelectItem key={domain.id} value={domain.id}>
                       {domain.domainName}
+                      {domain.verificationStatus !== 'verified' && (
+                        <span className="ml-2 text-xs text-amber-500">
+                          ({domain.verificationStatus === 'pending' ? 'DNS pending' : domain.verificationStatus})
+                        </span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {domains.length === 0 && !loadingDomains && (
+                <p className="text-xs text-amber-600 mt-1">
+                  No domains configured. Please add a domain first.
+                </p>
+              )}
             </div>
 
             {/* Email Local Part */}
