@@ -590,8 +590,8 @@ export const partnerRouter = router({
         defaultQuotaPerMailboxMB: z.number().min(100).default(1024), // Default quota per mailbox in MB
         maxMailboxes: z.number().min(0).default(0), // 0 = unlimited
         rateLimitPerHour: z.number().min(0).default(500), // Emails per hour
-        relayDomain: z.boolean().default(true),
-        relayAllRecipients: z.boolean().default(true),
+        relayDomain: z.boolean().default(false),
+        relayAllRecipients: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -658,7 +658,8 @@ export const partnerRouter = router({
             maxquota: input.maxQuotaPerMailboxMB,
             quota: input.domainQuotaGB * 1024,
             active: 1,
-            relay_all_recipients: input.relayAllRecipients ? 1 : 0,
+            relay_all_recipients: 0,
+            relay_unknown_only: 0,
           });
           console.log('[Mailcow] Domain creation result:', JSON.stringify(mailcowResult));
 
