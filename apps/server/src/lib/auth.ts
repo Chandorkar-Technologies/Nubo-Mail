@@ -14,6 +14,7 @@ import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
+import { hashPassword, verifyPassword } from './auth-utils';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
 // import { dubAnalytics } from '@dub/better-auth'; // Disabled - uses 'cache' in fetch which CF Workers doesn't support
@@ -315,6 +316,10 @@ export const createAuth = () => {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
+      password: {
+        hash: hashPassword,
+        verify: async ({ hash, password }) => verifyPassword(password, hash),
+      },
       sendResetPassword: async ({ user, url }) => {
         await resend().emails.send({
           from: 'Nubo <no-reply@nubo.email>',
