@@ -2037,101 +2037,160 @@ async function sendImportCompletionEmail(
   }
 }
 
-// Helper to recursively get all files from Google Drive
+// Helper to recursively get all files from Google Drive with better error handling
 async function getAllGoogleDriveFiles(
   accessToken: string,
   folderId?: string,
+  depth = 0,
 ): Promise<string[]> {
   const allFileIds: string[] = [];
   let pageToken: string | undefined;
+  const maxDepth = 20; // Prevent infinite recursion
 
-  do {
-    const query = folderId
-      ? `'${folderId}' in parents and trashed = false`
-      : "'root' in parents and trashed = false";
+  if (depth > maxDepth) {
+    console.warn(`[GoogleDriveImport] Max depth ${maxDepth} reached, stopping recursion`);
+    return allFileIds;
+  }
 
-    const params = new URLSearchParams({
-      q: query,
-      fields: 'nextPageToken, files(id, mimeType)',
-      pageSize: '1000',
-    });
+  const folderName = folderId || 'root';
+  console.log(`[GoogleDriveImport] Scanning folder: ${folderName} at depth ${depth}`);
 
-    if (pageToken) {
-      params.append('pageToken', pageToken);
-    }
+  try {
+    do {
+      const query = folderId
+        ? `'${folderId}' in parents and trashed = false`
+        : "'root' in parents and trashed = false";
 
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+      const params = new URLSearchParams({
+        q: query,
+        fields: 'nextPageToken, files(id, mimeType, name)',
+        pageSize: '1000',
+      });
 
-    if (!response.ok) {
-      console.error('[GoogleDriveImport] Failed to list files:', await response.text());
-      break;
-    }
-
-    const data = await response.json() as {
-      files: Array<{ id: string; mimeType: string }>;
-      nextPageToken?: string;
-    };
-
-    for (const file of data.files) {
-      if (file.mimeType === 'application/vnd.google-apps.folder') {
-        // Recursively get files from subfolder
-        const subFiles = await getAllGoogleDriveFiles(accessToken, file.id);
-        allFileIds.push(...subFiles);
-      } else {
-        allFileIds.push(file.id);
+      if (pageToken) {
+        params.append('pageToken', pageToken);
       }
-    }
 
-    pageToken = data.nextPageToken;
-  } while (pageToken);
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[GoogleDriveImport] Failed to list files in ${folderName}: ${response.status} - ${errorText}`);
+        // Don't break completely, return what we have so far
+        break;
+      }
+
+      const data = await response.json() as {
+        files: Array<{ id: string; mimeType: string; name: string }>;
+        nextPageToken?: string;
+      };
+
+      console.log(`[GoogleDriveImport] Found ${data.files.length} items in ${folderName}`);
+
+      const folders: Array<{ id: string; name: string }> = [];
+
+      for (const file of data.files) {
+        if (file.mimeType === 'application/vnd.google-apps.folder') {
+          folders.push({ id: file.id, name: file.name });
+        } else {
+          allFileIds.push(file.id);
+        }
+      }
+
+      // Process subfolders (limit concurrent to avoid rate limiting)
+      for (const folder of folders) {
+        try {
+          const subFiles = await getAllGoogleDriveFiles(accessToken, folder.id, depth + 1);
+          allFileIds.push(...subFiles);
+        } catch (folderError) {
+          console.error(`[GoogleDriveImport] Error scanning subfolder ${folder.name}:`, folderError);
+          // Continue with other folders
+        }
+      }
+
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+  } catch (error) {
+    console.error(`[GoogleDriveImport] Error scanning folder ${folderName}:`, error);
+  }
+
+  console.log(`[GoogleDriveImport] Total files found in ${folderName}: ${allFileIds.length}`);
   return allFileIds;
 }
 
-// Helper to recursively get all files from OneDrive
+// Helper to recursively get all files from OneDrive with better error handling
 async function getAllOneDriveFiles(
   accessToken: string,
   folderId?: string,
+  depth = 0,
 ): Promise<string[]> {
   const allFileIds: string[] = [];
   let nextLink: string | undefined;
+  const maxDepth = 20; // Prevent infinite recursion
+
+  if (depth > maxDepth) {
+    console.warn(`[OneDriveImport] Max depth ${maxDepth} reached, stopping recursion`);
+    return allFileIds;
+  }
+
+  const folderName = folderId || 'root';
+  console.log(`[OneDriveImport] Scanning folder: ${folderName} at depth ${depth}`);
 
   const baseUrl = folderId
     ? `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`
     : 'https://graph.microsoft.com/v1.0/me/drive/root/children';
 
-  let url = `${baseUrl}?$select=id,folder&$top=999`;
+  let url = `${baseUrl}?$select=id,name,folder&$top=999`;
 
-  do {
-    const response = await fetch(nextLink || url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+  try {
+    do {
+      const response = await fetch(nextLink || url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
-    if (!response.ok) {
-      console.error('[OneDriveImport] Failed to list files:', await response.text());
-      break;
-    }
-
-    const data = await response.json() as {
-      value: Array<{ id: string; folder?: object }>;
-      '@odata.nextLink'?: string;
-    };
-
-    for (const item of data.value) {
-      if (item.folder) {
-        // Recursively get files from subfolder
-        const subFiles = await getAllOneDriveFiles(accessToken, item.id);
-        allFileIds.push(...subFiles);
-      } else {
-        allFileIds.push(item.id);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[OneDriveImport] Failed to list files in ${folderName}: ${response.status} - ${errorText}`);
+        break;
       }
-    }
 
-    nextLink = data['@odata.nextLink'];
-  } while (nextLink);
+      const data = await response.json() as {
+        value: Array<{ id: string; name: string; folder?: object }>;
+        '@odata.nextLink'?: string;
+      };
 
+      console.log(`[OneDriveImport] Found ${data.value.length} items in ${folderName}`);
+
+      const folders: Array<{ id: string; name: string }> = [];
+
+      for (const item of data.value) {
+        if (item.folder) {
+          folders.push({ id: item.id, name: item.name });
+        } else {
+          allFileIds.push(item.id);
+        }
+      }
+
+      // Process subfolders
+      for (const folder of folders) {
+        try {
+          const subFiles = await getAllOneDriveFiles(accessToken, folder.id, depth + 1);
+          allFileIds.push(...subFiles);
+        } catch (folderError) {
+          console.error(`[OneDriveImport] Error scanning subfolder ${folder.name}:`, folderError);
+          // Continue with other folders
+        }
+      }
+
+      nextLink = data['@odata.nextLink'];
+    } while (nextLink);
+  } catch (error) {
+    console.error(`[OneDriveImport] Error scanning folder ${folderName}:`, error);
+  }
+
+  console.log(`[OneDriveImport] Total files found in ${folderName}: ${allFileIds.length}`);
   return allFileIds;
 }
 
