@@ -272,8 +272,8 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
 
     if (status === 2 || status === 6) {
       // Document is ready for saving - download and update R2
-      // Key format: {fileId}-{timestamp}
-      const fileId = key.split('-')[0];
+      // Key format: {fileId}_{timestamp} (underscore separator since UUIDs contain dashes)
+      const fileId = key.split('_')[0];
 
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
@@ -593,8 +593,9 @@ driveApiRouter.get('/shared/:token/editor-config', async (c) => {
           : 'word';
 
     // Generate unique key for this editing session
+    // Use underscore separator since UUIDs contain dashes
     const timestamp = new Date(file.updatedAt).getTime();
-    const documentKey = `${file.id}-${timestamp}`;
+    const documentKey = `${file.id}_${timestamp}`;
 
     // OnlyOffice Document Server configuration
     const config = {

@@ -686,8 +686,9 @@ export const driveRouter = router({
 
       // Generate unique key for this editing session - this MUST change when file is modified
       // OnlyOffice uses this key to cache documents, so a unique key forces a fresh load
+      // Use underscore separator since UUIDs contain dashes
       const timestamp = file.updatedAt.getTime();
-      const documentKey = `${file.id}-${timestamp}`;
+      const documentKey = `${file.id}_${timestamp}`;
 
       // OnlyOffice Document Server configuration
       const config = {
