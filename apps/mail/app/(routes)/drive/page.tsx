@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useTRPC } from '@/providers/query-provider';
+import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Button } from '@/components/ui/button';
@@ -104,6 +104,7 @@ export default function DrivePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const trpc = useTRPC();
+  const trpcClient = useTRPCClient();
 
   // State
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -470,7 +471,7 @@ export default function DrivePage() {
     }
     setShareSearching(true);
     try {
-      const results = await trpc.drive.searchUsers.query({ query });
+      const results = await trpcClient.drive.searchUsers.query({ query });
       setShareSearchResults(results);
     } catch {
       setShareSearchResults([]);
@@ -725,7 +726,7 @@ export default function DrivePage() {
       // Poll for job status
       const pollInterval = setInterval(async () => {
         try {
-          const job = await trpc.drive.getImportJob.query({ jobId: result.jobId! });
+          const job = await trpcClient.drive.getImportJob.query({ jobId: result.jobId! });
           setActiveImportJob({
             jobId: result.jobId!,
             totalFiles: job.totalFiles,
@@ -866,7 +867,7 @@ export default function DrivePage() {
       // Poll for job status
       const pollInterval = setInterval(async () => {
         try {
-          const job = await trpc.drive.getImportJob.query({ jobId });
+          const job = await trpcClient.drive.getImportJob.query({ jobId });
           setActiveImportJob({
             jobId,
             totalFiles: job.totalFiles,
