@@ -273,7 +273,11 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
     if (status === 2 || status === 6) {
       // Document is ready for saving - download and update R2
       // Key format: {fileId}_{timestamp} (underscore separator since UUIDs contain dashes)
-      const fileId = key.split('_')[0];
+      // Support both old format (dash) and new format (underscore) for backward compatibility
+      const hasUnderscore = key.includes('_');
+      const fileId = hasUnderscore ? key.split('_')[0] : key.substring(0, 36); // UUID is 36 chars
+
+      console.log(`[OnlyOffice Callback] Processing save - key: ${key}, extracted fileId: ${fileId}, hasUnderscore: ${hasUnderscore}`);
 
       const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
@@ -283,8 +287,8 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
         });
 
         if (!file) {
-          console.error(`[OnlyOffice Callback] File not found: ${fileId}`);
-          return c.json({ error: 0 }); // Return 0 to indicate error to OnlyOffice
+          console.error(`[OnlyOffice Callback] File not found: ${fileId} (key was: ${key})`);
+          return c.json({ error: 1 }); // Return 1 to indicate error to OnlyOffice
         }
 
         // Download the edited document from OnlyOffice
@@ -298,7 +302,7 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
         const response = await fetch(url, { headers: fetchHeaders });
         if (!response.ok) {
           console.error(`[OnlyOffice Callback] Failed to download document: ${response.status} ${await response.text()}`);
-          return c.json({ error: 0 });
+          return c.json({ error: 1 }); // Return 1 to indicate error to OnlyOffice
         }
 
         const content = await response.arrayBuffer();
@@ -320,10 +324,12 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
           })
           .where(eq(driveFile.id, fileId));
 
-        console.log(`[OnlyOffice Callback] File saved: ${fileId}`);
+        console.log(`[OnlyOffice Callback] File saved successfully: ${fileId}, new size: ${content.byteLength} bytes`);
       } finally {
         await conn.end();
       }
+    } else {
+      console.log(`[OnlyOffice Callback] Received status ${status} for key ${key} - no action needed`);
     }
 
     // Return 0 to indicate success to OnlyOffice
