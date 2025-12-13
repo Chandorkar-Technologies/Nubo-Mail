@@ -1101,48 +1101,74 @@ export const driveRouter = router({
       const { sessionUser } = ctx;
       const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
 
-      // First, get all file IDs recursively
-      console.log(`[GoogleDriveImport] Starting full drive scan for user ${sessionUser.id}`);
-      const allFileIds = await getAllGoogleDriveFiles(input.accessToken);
-      console.log(`[GoogleDriveImport] Found ${allFileIds.length} files to import`);
-
-      if (allFileIds.length === 0) {
-        return { jobId: null, totalFiles: 0 };
-      }
-
-      // Create import job
+      // Create import job FIRST with 'scanning' status, return immediately
       const jobId = crypto.randomUUID();
+      console.log(`[GoogleDriveImport] Creating job ${jobId} for user ${sessionUser.id}`);
+
       await ctx.db.insert(driveImportJob).values({
         id: jobId,
         userId: sessionUser.id,
         source: 'google_drive',
-        status: 'processing',
-        totalFiles: allFileIds.length,
+        status: 'scanning', // New status for scanning phase
+        totalFiles: 0,
         processedFiles: 0,
         failedFiles: 0,
-        sourceFileIds: allFileIds,
+        sourceFileIds: [],
         targetFolderId: input.targetFolderId || null,
         startedAt: new Date(),
         createdAt: new Date(),
       });
 
-      // Process files using waitUntil to keep worker alive
-      const importPromise = processGoogleDriveImport(
-        input.accessToken,
-        allFileIds,
-        sessionUser.id,
-        sessionUser.email,
-        jobId,
-        input.targetFolderId || null,
-        ctx.db,
-        bucket,
-      ).catch((error) => {
-        console.error('[GoogleDriveImport] Full import failed:', error);
-      });
+      // Do scanning and processing in background
+      const backgroundTask = async () => {
+        try {
+          console.log(`[GoogleDriveImport] Starting full drive scan for job ${jobId}`);
+          const allFileIds = await getAllGoogleDriveFiles(input.accessToken);
+          console.log(`[GoogleDriveImport] Found ${allFileIds.length} files to import`);
 
-      ctx.c.executionCtx.waitUntil(importPromise);
+          if (allFileIds.length === 0) {
+            await ctx.db
+              .update(driveImportJob)
+              .set({ status: 'completed', totalFiles: 0, completedAt: new Date() })
+              .where(eq(driveImportJob.id, jobId));
+            await sendImportCompletionEmail(sessionUser.email, 'Google Drive', 0, 0, 0);
+            return;
+          }
 
-      return { jobId, totalFiles: allFileIds.length };
+          // Update job with file count and change status to processing
+          await ctx.db
+            .update(driveImportJob)
+            .set({
+              status: 'processing',
+              totalFiles: allFileIds.length,
+              sourceFileIds: allFileIds,
+            })
+            .where(eq(driveImportJob.id, jobId));
+
+          // Now process the files
+          await processGoogleDriveImport(
+            input.accessToken,
+            allFileIds,
+            sessionUser.id,
+            sessionUser.email,
+            jobId,
+            input.targetFolderId || null,
+            ctx.db,
+            bucket,
+          );
+        } catch (error) {
+          console.error('[GoogleDriveImport] Full import failed:', error);
+          await ctx.db
+            .update(driveImportJob)
+            .set({ status: 'failed', completedAt: new Date() })
+            .where(eq(driveImportJob.id, jobId));
+        }
+      };
+
+      ctx.c.executionCtx.waitUntil(backgroundTask());
+
+      // Return immediately with the job ID - UI will poll for status
+      return { jobId, totalFiles: -1 }; // -1 indicates scanning in progress
     }),
 
   // Import entire OneDrive (recursive)
@@ -1155,48 +1181,74 @@ export const driveRouter = router({
       const { sessionUser } = ctx;
       const bucket = ctx.c.env.DRIVE_BUCKET as R2Bucket;
 
-      // First, get all file IDs recursively
-      console.log(`[OneDriveImport] Starting full drive scan for user ${sessionUser.id}`);
-      const allFileIds = await getAllOneDriveFiles(input.accessToken);
-      console.log(`[OneDriveImport] Found ${allFileIds.length} files to import`);
-
-      if (allFileIds.length === 0) {
-        return { jobId: null, totalFiles: 0 };
-      }
-
-      // Create import job
+      // Create import job FIRST with 'scanning' status, return immediately
       const jobId = crypto.randomUUID();
+      console.log(`[OneDriveImport] Creating job ${jobId} for user ${sessionUser.id}`);
+
       await ctx.db.insert(driveImportJob).values({
         id: jobId,
         userId: sessionUser.id,
         source: 'onedrive',
-        status: 'processing',
-        totalFiles: allFileIds.length,
+        status: 'scanning', // New status for scanning phase
+        totalFiles: 0,
         processedFiles: 0,
         failedFiles: 0,
-        sourceFileIds: allFileIds,
+        sourceFileIds: [],
         targetFolderId: input.targetFolderId || null,
         startedAt: new Date(),
         createdAt: new Date(),
       });
 
-      // Process files using waitUntil to keep worker alive
-      const importPromise = processOneDriveImport(
-        input.accessToken,
-        allFileIds,
-        sessionUser.id,
-        sessionUser.email,
-        jobId,
-        input.targetFolderId || null,
-        ctx.db,
-        bucket,
-      ).catch((error) => {
-        console.error('[OneDriveImport] Full import failed:', error);
-      });
+      // Do scanning and processing in background
+      const backgroundTask = async () => {
+        try {
+          console.log(`[OneDriveImport] Starting full drive scan for job ${jobId}`);
+          const allFileIds = await getAllOneDriveFiles(input.accessToken);
+          console.log(`[OneDriveImport] Found ${allFileIds.length} files to import`);
 
-      ctx.c.executionCtx.waitUntil(importPromise);
+          if (allFileIds.length === 0) {
+            await ctx.db
+              .update(driveImportJob)
+              .set({ status: 'completed', totalFiles: 0, completedAt: new Date() })
+              .where(eq(driveImportJob.id, jobId));
+            await sendImportCompletionEmail(sessionUser.email, 'OneDrive', 0, 0, 0);
+            return;
+          }
 
-      return { jobId, totalFiles: allFileIds.length };
+          // Update job with file count and change status to processing
+          await ctx.db
+            .update(driveImportJob)
+            .set({
+              status: 'processing',
+              totalFiles: allFileIds.length,
+              sourceFileIds: allFileIds,
+            })
+            .where(eq(driveImportJob.id, jobId));
+
+          // Now process the files
+          await processOneDriveImport(
+            input.accessToken,
+            allFileIds,
+            sessionUser.id,
+            sessionUser.email,
+            jobId,
+            input.targetFolderId || null,
+            ctx.db,
+            bucket,
+          );
+        } catch (error) {
+          console.error('[OneDriveImport] Full import failed:', error);
+          await ctx.db
+            .update(driveImportJob)
+            .set({ status: 'failed', completedAt: new Date() })
+            .where(eq(driveImportJob.id, jobId));
+        }
+      };
+
+      ctx.c.executionCtx.waitUntil(backgroundTask());
+
+      // Return immediately with the job ID - UI will poll for status
+      return { jobId, totalFiles: -1 }; // -1 indicates scanning in progress
     }),
 
   // ================== SHARING ENDPOINTS ==================

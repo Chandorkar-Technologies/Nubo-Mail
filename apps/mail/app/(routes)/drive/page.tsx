@@ -145,7 +145,7 @@ export default function DrivePage() {
     totalFiles: number;
     processedFiles: number;
     failedFiles: number;
-    status: 'processing' | 'completed' | 'failed';
+    status: 'scanning' | 'processing' | 'completed' | 'failed';
   } | null>(null);
 
   // Upload state
@@ -692,7 +692,7 @@ export default function DrivePage() {
         });
       }
 
-      if (!result.jobId || result.totalFiles === 0) {
+      if (!result.jobId) {
         toast.info('No files found to import');
         setIsImportOpen(false);
         setIsFullDriveImport(false);
@@ -700,15 +700,21 @@ export default function DrivePage() {
       }
 
       // Set active import job for progress tracking
+      // totalFiles = -1 means scanning is in progress
+      const isScanning = result.totalFiles === -1;
       setActiveImportJob({
         jobId: result.jobId,
-        totalFiles: result.totalFiles,
+        totalFiles: isScanning ? 0 : result.totalFiles,
         processedFiles: 0,
         failedFiles: 0,
-        status: 'processing',
+        status: isScanning ? 'scanning' : 'processing',
       });
 
-      toast.success(`Importing ${result.totalFiles} files from your ${source === 'google_drive' ? 'Google Drive' : 'OneDrive'}. You'll receive an email when complete.`);
+      const sourceName = source === 'google_drive' ? 'Google Drive' : 'OneDrive';
+      toast.success(isScanning
+        ? `Scanning your ${sourceName}... You'll receive an email when import is complete.`
+        : `Importing ${result.totalFiles} files from your ${sourceName}. You'll receive an email when complete.`
+      );
 
       // Reset import dialog state
       setIsImportOpen(false);
@@ -725,7 +731,7 @@ export default function DrivePage() {
             totalFiles: job.totalFiles,
             processedFiles: job.processedFiles,
             failedFiles: job.failedFiles,
-            status: job.status as 'processing' | 'completed' | 'failed',
+            status: job.status as 'scanning' | 'processing' | 'completed' | 'failed',
           });
 
           if (job.status === 'completed' || job.status === 'failed') {
@@ -733,7 +739,11 @@ export default function DrivePage() {
             invalidate();
 
             if (job.status === 'completed') {
-              toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles > 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
+              if (job.totalFiles === 0) {
+                toast.info('No files found to import');
+              } else {
+                toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles !== 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
+              }
             } else {
               toast.error(`Import failed. ${job.processedFiles} succeeded, ${job.failedFiles} failed.`);
             }
@@ -862,7 +872,7 @@ export default function DrivePage() {
             totalFiles: job.totalFiles,
             processedFiles: job.processedFiles,
             failedFiles: job.failedFiles,
-            status: job.status as 'processing' | 'completed' | 'failed',
+            status: job.status as 'scanning' | 'processing' | 'completed' | 'failed',
           });
 
           if (job.status === 'completed' || job.status === 'failed') {
@@ -870,7 +880,7 @@ export default function DrivePage() {
             invalidate();
 
             if (job.status === 'completed') {
-              toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles > 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
+              toast.success(`Successfully imported ${job.processedFiles} file${job.processedFiles !== 1 ? 's' : ''}${job.failedFiles > 0 ? ` (${job.failedFiles} failed)` : ''}`);
             } else {
               toast.error(`Import failed. ${job.processedFiles} succeeded, ${job.failedFiles} failed.`);
             }
@@ -1099,7 +1109,7 @@ export default function DrivePage() {
         <div className="border-b bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              {activeImportJob.status === 'processing' ? (
+              {activeImportJob.status === 'scanning' || activeImportJob.status === 'processing' ? (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
               ) : activeImportJob.status === 'completed' ? (
                 <CheckCircle2 className="h-4 w-4 text-green-500" />
@@ -1107,29 +1117,39 @@ export default function DrivePage() {
                 <AlertCircle className="h-4 w-4 text-destructive" />
               )}
               <span className="text-sm font-medium">
-                {activeImportJob.status === 'processing'
-                  ? 'Importing files...'
-                  : activeImportJob.status === 'completed'
-                    ? 'Import complete!'
-                    : 'Import failed'}
+                {activeImportJob.status === 'scanning'
+                  ? 'Scanning drive...'
+                  : activeImportJob.status === 'processing'
+                    ? 'Importing files...'
+                    : activeImportJob.status === 'completed'
+                      ? 'Import complete!'
+                      : 'Import failed'}
               </span>
             </div>
             <div className="flex-1">
-              <Progress
-                value={(activeImportJob.processedFiles + activeImportJob.failedFiles) / activeImportJob.totalFiles * 100}
-                className="h-2"
-              />
+              {activeImportJob.status === 'scanning' ? (
+                <Progress value={undefined} className="h-2" />
+              ) : (
+                <Progress
+                  value={activeImportJob.totalFiles > 0 ? (activeImportJob.processedFiles + activeImportJob.failedFiles) / activeImportJob.totalFiles * 100 : 0}
+                  className="h-2"
+                />
+              )}
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <span>
-                {activeImportJob.processedFiles + activeImportJob.failedFiles} / {activeImportJob.totalFiles}
-              </span>
+              {activeImportJob.status === 'scanning' ? (
+                <span>Discovering files...</span>
+              ) : (
+                <span>
+                  {activeImportJob.processedFiles + activeImportJob.failedFiles} / {activeImportJob.totalFiles}
+                </span>
+              )}
               {activeImportJob.failedFiles > 0 && (
                 <span className="text-destructive">
                   ({activeImportJob.failedFiles} failed)
                 </span>
               )}
-              {activeImportJob.status === 'processing' && (
+              {(activeImportJob.status === 'scanning' || activeImportJob.status === 'processing') && (
                 <Button
                   variant="ghost"
                   size="sm"
