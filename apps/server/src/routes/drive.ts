@@ -48,9 +48,15 @@ driveApiRouter.post('/upload', async (c) => {
 
     try {
       // Check drive storage quota for organization users
-      const orgUser = await db.query.organizationUser.findFirst({
-        where: eq(organizationUser.userId, userRecord.id),
-      });
+      // Wrap in try-catch since the table might not exist in all environments
+      let orgUser = null;
+      try {
+        orgUser = await db.query.organizationUser.findFirst({
+          where: eq(organizationUser.userId, userRecord.id),
+        });
+      } catch {
+        // Continue without quota check if table doesn't exist
+      }
 
       if (orgUser) {
         // Get current drive usage
@@ -63,7 +69,7 @@ driveApiRouter.post('/upload', async (c) => {
         const quotaBytes = orgUser.driveStorageBytes;
 
         // Check if upload would exceed quota
-        if (quotaBytes > 0 && usedBytes + file.size > quotaBytes) {
+        if (quotaBytes && quotaBytes > 0 && usedBytes + file.size > quotaBytes) {
           const usedGB = (usedBytes / (1024 * 1024 * 1024)).toFixed(2);
           const quotaGB = (quotaBytes / (1024 * 1024 * 1024)).toFixed(2);
           return c.json({
@@ -75,13 +81,17 @@ driveApiRouter.post('/upload', async (c) => {
         }
 
         // Update organization user's drive used bytes
-        await db
-          .update(organizationUser)
-          .set({
-            driveUsedBytes: usedBytes + file.size,
-            updatedAt: new Date(),
-          })
-          .where(eq(organizationUser.id, orgUser.id));
+        try {
+          await db
+            .update(organizationUser)
+            .set({
+              driveUsedBytes: usedBytes + file.size,
+              updatedAt: new Date(),
+            })
+            .where(eq(organizationUser.id, orgUser.id));
+        } catch {
+          // Continue if update fails
+        }
       }
 
       // Verify folder exists if provided
@@ -135,6 +145,18 @@ driveApiRouter.post('/upload', async (c) => {
     console.error('Upload error:', error);
     return c.json({ error: 'Upload failed' }, 500);
   }
+});
+
+// CORS preflight for upload
+driveApiRouter.options('/upload', () => {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Credentials': 'true',
+    },
+  });
 });
 
 // Download file endpoint
