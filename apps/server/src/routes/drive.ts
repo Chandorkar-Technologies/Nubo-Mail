@@ -2,7 +2,6 @@ import { and, eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { createDb } from '../db';
 import { driveFile, driveFolder, organizationUser } from '../db/schema';
-import { env } from '../env';
 import type { HonoContext } from '../ctx';
 import jwt from '@tsndr/cloudflare-worker-jwt';
 
@@ -43,8 +42,9 @@ driveApiRouter.post('/upload', async (c) => {
     }
 
     const file = fileEntry as unknown as { name: string; type: string; size: number; arrayBuffer(): Promise<ArrayBuffer> };
+    const workerEnv = c.env;
 
-    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
     try {
       // Check drive storage quota for organization users
@@ -100,7 +100,7 @@ driveApiRouter.post('/upload', async (c) => {
       const r2Key = `drive/${userRecord.id}/${fileId}/${file.name}`;
 
       // Upload to R2
-      const bucket = env.DRIVE_BUCKET;
+      const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
       const arrayBuffer = await file.arrayBuffer();
       await bucket.put(r2Key, arrayBuffer, {
         httpMetadata: {
@@ -141,12 +141,13 @@ driveApiRouter.post('/upload', async (c) => {
 driveApiRouter.get('/download/:fileId', async (c) => {
   const fileId = c.req.param('fileId');
   const userRecord = c.var.sessionUser;
+  const workerEnv = c.env;
 
   if (!userRecord) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     const file = await db.query.driveFile.findFirst({
@@ -157,7 +158,7 @@ driveApiRouter.get('/download/:fileId', async (c) => {
       return c.json({ error: 'File not found' }, 404);
     }
 
-    const bucket = env.DRIVE_BUCKET;
+    const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -178,10 +179,11 @@ driveApiRouter.get('/download/:fileId', async (c) => {
 // Get file content (for OnlyOffice)
 driveApiRouter.get('/file/:fileId/content', async (c) => {
   const fileId = c.req.param('fileId');
+  const workerEnv = c.env;
   // For OnlyOffice, we might need to accept a token in query params
   const _token = c.req.query('token') || c.req.header('Authorization')?.replace('Bearer ', '');
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     const file = await db.query.driveFile.findFirst({
@@ -192,7 +194,7 @@ driveApiRouter.get('/file/:fileId/content', async (c) => {
       return c.json({ error: 'File not found' }, 404);
     }
 
-    const bucket = env.DRIVE_BUCKET;
+    const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -219,8 +221,9 @@ driveApiRouter.get('/file/:fileId/content', async (c) => {
 
 // OnlyOffice callback endpoint
 driveApiRouter.post('/onlyoffice/callback', async (c) => {
+  const workerEnv = c.env;
   try {
-    const jwtSecret = env.ONLYOFFICE_JWT_SECRET;
+    const jwtSecret = workerEnv.ONLYOFFICE_JWT_SECRET;
 
     // Verify JWT token from OnlyOffice if JWT is configured
     if (jwtSecret) {
@@ -279,7 +282,7 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
 
       console.log(`[OnlyOffice Callback] Processing save - key: ${key}, extracted fileId: ${fileId}, hasUnderscore: ${hasUnderscore}`);
 
-      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
       try {
         const file = await db.query.driveFile.findFirst({
@@ -308,7 +311,7 @@ driveApiRouter.post('/onlyoffice/callback', async (c) => {
         const content = await response.arrayBuffer();
 
         // Update file in R2
-        const bucket = env.DRIVE_BUCKET;
+        const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
         await bucket.put(file.r2Key, content, {
           httpMetadata: {
             contentType: file.mimeType,
@@ -364,8 +367,9 @@ driveApiRouter.options('/file/:fileId/content', () => {
 // Public endpoint to get shared file/folder info by share token (no auth required)
 driveApiRouter.get('/shared/:token', async (c) => {
   const token = c.req.param('token');
+  const workerEnv = c.env;
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     // Import driveShare table
@@ -427,8 +431,9 @@ driveApiRouter.get('/shared/:token', async (c) => {
 // Public endpoint to download shared file by share token (no auth required)
 driveApiRouter.get('/shared/:token/download', async (c) => {
   const token = c.req.param('token');
+  const workerEnv = c.env;
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     const { driveShare } = await import('../db/schema');
@@ -456,7 +461,7 @@ driveApiRouter.get('/shared/:token/download', async (c) => {
     }
 
     const file = share.file;
-    const bucket = env.DRIVE_BUCKET;
+    const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -480,8 +485,9 @@ driveApiRouter.get('/shared/:token/download', async (c) => {
 // Public endpoint to preview shared file (for images, PDFs, videos)
 driveApiRouter.get('/shared/:token/preview', async (c) => {
   const token = c.req.param('token');
+  const workerEnv = c.env;
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     const { driveShare } = await import('../db/schema');
@@ -508,7 +514,7 @@ driveApiRouter.get('/shared/:token/preview', async (c) => {
     }
 
     const file = share.file;
-    const bucket = env.DRIVE_BUCKET;
+    const bucket = workerEnv.DRIVE_BUCKET as R2Bucket;
     const object = await bucket.get(file.r2Key);
 
     if (!object) {
@@ -535,8 +541,9 @@ driveApiRouter.get('/shared/:token/preview', async (c) => {
 // Get OnlyOffice editor config for shared file (no auth required, but needs edit access)
 driveApiRouter.get('/shared/:token/editor-config', async (c) => {
   const token = c.req.param('token');
+  const workerEnv = c.env;
 
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db, conn } = createDb(workerEnv.HYPERDRIVE.connectionString);
 
   try {
     const { driveShare } = await import('../db/schema');
@@ -581,9 +588,9 @@ driveApiRouter.get('/shared/:token/editor-config', async (c) => {
       return c.json({ error: 'File type not supported for editing' }, 400);
     }
 
-    const onlyOfficeUrl = env.ONLYOFFICE_URL || 'https://office.nubo.email';
-    const jwtSecret = env.ONLYOFFICE_JWT_SECRET;
-    const backendUrl = env.VITE_PUBLIC_BACKEND_URL;
+    const onlyOfficeUrl = workerEnv.ONLYOFFICE_URL || 'https://office.nubo.email';
+    const jwtSecret = workerEnv.ONLYOFFICE_JWT_SECRET;
+    const backendUrl = workerEnv.VITE_PUBLIC_BACKEND_URL;
 
     if (!jwtSecret) {
       return c.json({ error: 'OnlyOffice not configured' }, 500);
